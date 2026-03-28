@@ -1,175 +1,304 @@
-import * as React from 'react';
-import Avatar from '@mui/material/Avatar';
-import Button from '@mui/material/Button';
-import CssBaseline from '@mui/material/CssBaseline';
-import TextField from '@mui/material/TextField';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
-import Link from '@mui/material/Link';
-import Paper from '@mui/material/Paper';
-import Box from '@mui/material/Box';
-import Grid from '@mui/material/Grid';
-import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
-import Typography from '@mui/material/Typography';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
-import { AuthContext } from '../contexts/AuthContext';
-import { Snackbar } from '@mui/material';
+import React, { useState, useContext } from "react";
+import { useSearchParams } from "react-router-dom";
+import { AuthContext } from "../contexts/AuthContext.jsx";
+import { Eye, EyeOff, Video, Mail, Lock, User as UserIcon } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
+/**
+ * Calculate password strength: 0=none, 1=weak, 2=medium, 3=strong
+ */
+function getPasswordStrength(password) {
+    if (!password) return 0;
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
+    if (/[0-9]/.test(password) && /[^a-zA-Z0-9]/.test(password)) score++;
+    return score;
+}
 
-
-// TODO remove, this demo shouldn't need to reset the theme.
-
-const defaultTheme = createTheme();
+const strengthLabels = ["", "Weak", "Medium", "Strong"];
+const strengthColors = ["bg-navy-700", "bg-red-500", "bg-yellow-500", "bg-teal"];
 
 export default function Authentication() {
+    const [searchParams] = useSearchParams();
+    const [formState, setFormState] = useState(
+        searchParams.get("mode") === "register" ? 1 : 0
+    );
+    const [name, setName] = useState("");
+    const [username, setUsername] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirm, setShowConfirm] = useState(false);
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
+    const [fieldErrors, setFieldErrors] = useState({});
+    const [loading, setLoading] = useState(false);
 
-    
+    const { handleRegister, handleLogin } = useContext(AuthContext);
 
-    const [username, setUsername] = React.useState();
-    const [password, setPassword] = React.useState();
-    const [name, setName] = React.useState();
-    const [error, setError] = React.useState();
-    const [message, setMessage] = React.useState();
+    const strength = getPasswordStrength(password);
 
+    const validateForm = () => {
+        const errors = {};
 
-    const [formState, setFormState] = React.useState(0);
+        if (formState === 1 && !name.trim()) {
+            errors.name = "Full name is required.";
+        }
 
-    const [open, setOpen] = React.useState(false)
+        if (!username.trim()) {
+            errors.username = "Username is required.";
+        } else if (formState === 1 && username.length < 3) {
+            errors.username = "Username must be at least 3 characters.";
+        }
 
+        if (!password) {
+            errors.password = "Password is required.";
+        } else if (formState === 1 && password.length < 8) {
+            errors.password = "Password must be at least 8 characters.";
+        }
 
-    const { handleRegister, handleLogin } = React.useContext(AuthContext);
+        if (formState === 1 && password !== confirmPassword) {
+            errors.confirmPassword = "Passwords do not match.";
+        }
 
-    let handleAuth = async () => {
+        setFieldErrors(errors);
+        return Object.keys(errors).length === 0;
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError("");
+        setSuccess("");
+
+        if (!validateForm()) return;
+
+        setLoading(true);
+
         try {
             if (formState === 0) {
-
-                let result = await handleLogin(username, password)
-
-
-            }
-            if (formState === 1) {
-                let result = await handleRegister(name, username, password);
-                console.log(result);
-                setUsername("");
-                setMessage(result);
-                setOpen(true);
-                setError("")
-                setFormState(0)
-                setPassword("")
+                await handleLogin(username, password);
+            } else {
+                await handleRegister(name, username, password);
             }
         } catch (err) {
-
-            console.log(err);
-            let message = (err.response.data.message);
-            setError(message);
+            const msg =
+                err.response?.data?.message ||
+                err.response?.data?.errors?.[0]?.message ||
+                "Something went wrong. Please try again.";
+            setError(msg);
+        } finally {
+            setLoading(false);
         }
-    }
+    };
 
+    const switchTab = (tab) => {
+        setFormState(tab);
+        setError("");
+        setSuccess("");
+        setFieldErrors({});
+    };
 
     return (
-        <ThemeProvider theme={defaultTheme}>
-            <Grid container component="main" sx={{ height: '100vh' }}>
-                <CssBaseline />
-                <Grid
-                    item
-                    xs={false}
-                    sm={4}
-                    md={7}
-                    sx={{
-                        backgroundImage: 'url(https://source.unsplash.com/random?wallpapers)',
-                        backgroundRepeat: 'no-repeat',
-                        backgroundColor: (t) =>
-                            t.palette.mode === 'light' ? t.palette.grey[50] : t.palette.grey[900],
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                    }}
-                />
-                <Grid item xs={12} sm={8} md={5} component={Paper} elevation={6} square>
-                    <Box
-                        sx={{
-                            my: 8,
-                            mx: 4,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                        }}
-                    >
-                        <Avatar sx={{ m: 1, bgcolor: 'secondary.main' }}>
-                            <LockOutlinedIcon />
-                        </Avatar>
+        <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
+            <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="w-full max-w-md"
+            >
+                <div className="glass-panel rounded-2xl p-8 relative overflow-hidden">
+                    {/* Background decoration */}
+                    <div className="absolute top-0 right-0 -mt-16 -mr-16 w-32 h-32 bg-teal/10 rounded-full blur-2xl"></div>
+                    <div className="absolute bottom-0 left-0 -mb-16 -ml-16 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
 
-
-                        <div>
-                            <Button variant={formState === 0 ? "contained" : ""} onClick={() => { setFormState(0) }}>
-                                Sign In
-                            </Button>
-                            <Button variant={formState === 1 ? "contained" : ""} onClick={() => { setFormState(1) }}>
-                                Sign Up
-                            </Button>
+                    <div className="relative z-10">
+                        <div className="text-center mb-8">
+                            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-teal/10 text-teal mb-4">
+                                <Video size={24} />
+                            </div>
+                            <h1 className="text-2xl font-bold text-white mb-2">
+                                {formState === 0 ? "Welcome Back" : "Create Account"}
+                            </h1>
+                            <p className="text-white-darker text-sm">
+                                {formState === 0 
+                                    ? "Sign in to access your dashboard" 
+                                    : "Join VI Connects for secure video meetings"}
+                            </p>
                         </div>
 
-                        <Box component="form" noValidate sx={{ mt: 1 }}>
-                            {formState === 1 ? <TextField
-                                margin="normal"
-                                required
-                                fullWidth
-                                id="username"
-                                label="Full Name"
-                                name="username"
-                                value={name}
-                                autoFocus
-                                onChange={(e) => setName(e.target.value)}
-                            /> : <></>}
-
-                            <TextField
-                                margin="normal"
-                                required
-                                fullWidth
-                                id="username"
-                                label="Username"
-                                name="username"
-                                value={username}
-                                autoFocus
-                                onChange={(e) => setUsername(e.target.value)}
-
-                            />
-                            <TextField
-                                margin="normal"
-                                required
-                                fullWidth
-                                name="password"
-                                label="Password"
-                                value={password}
-                                type="password"
-                                onChange={(e) => setPassword(e.target.value)}
-
-                                id="password"
-                            />
-
-                            <p style={{ color: "red" }}>{error}</p>
-
-                            <Button
-                                type="button"
-                                fullWidth
-                                variant="contained"
-                                sx={{ mt: 3, mb: 2 }}
-                                onClick={handleAuth}
+                        {/* Tab Toggle */}
+                        <div className="flex p-1 bg-navy-900 rounded-lg mb-8">
+                            <button
+                                onClick={() => switchTab(0)}
+                                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
+                                    formState === 0 ? "bg-navy-700 text-white shadow" : "text-white-darker hover:text-white"
+                                }`}
                             >
-                                {formState === 0 ? "Login " : "Register"}
-                            </Button>
+                                Sign In
+                            </button>
+                            <button
+                                onClick={() => switchTab(1)}
+                                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
+                                    formState === 1 ? "bg-navy-700 text-white shadow" : "text-white-darker hover:text-white"
+                                }`}
+                            >
+                                Sign Up
+                            </button>
+                        </div>
 
-                        </Box>
-                    </Box>
-                </Grid>
-            </Grid>
+                        <AnimatePresence mode="wait">
+                            <motion.form 
+                                key={formState}
+                                initial={{ opacity: 0, x: formState === 0 ? -20 : 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: formState === 0 ? 20 : -20 }}
+                                transition={{ duration: 0.2 }}
+                                onSubmit={handleSubmit} 
+                                className="space-y-5"
+                                noValidate
+                            >
+                                {/* Error/Success Messages */}
+                                {error && (
+                                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm text-center">
+                                        {error}
+                                    </div>
+                                )}
+                                {success && (
+                                    <div className="p-3 bg-teal/10 border border-teal/20 rounded-lg text-teal text-sm text-center">
+                                        {success}
+                                    </div>
+                                )}
 
-            <Snackbar
+                                {/* Full Name (register only) */}
+                                {formState === 1 && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-white-muted mb-1.5">Full Name</label>
+                                        <div className="relative">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <UserIcon size={18} className="text-white-darker" />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                className={`w-full pl-10 pr-4 py-2 bg-navy-900 border ${fieldErrors.name ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                                placeholder="John Doe"
+                                                value={name}
+                                                onChange={(e) => setName(e.target.value)}
+                                            />
+                                        </div>
+                                        {fieldErrors.name && <p className="mt-1 text-xs text-red-400">{fieldErrors.name}</p>}
+                                    </div>
+                                )}
 
-                open={open}
-                autoHideDuration={4000}
-                message={message}
-            />
+                                {/* Username */}
+                                <div>
+                                    <label className="block text-sm font-medium text-white-muted mb-1.5">Username</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <Mail size={18} className="text-white-darker" />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            className={`w-full pl-10 pr-4 py-2 bg-navy-900 border ${fieldErrors.username ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                            placeholder="Enter your username"
+                                            value={username}
+                                            onChange={(e) => setUsername(e.target.value)}
+                                        />
+                                    </div>
+                                    {fieldErrors.username && <p className="mt-1 text-xs text-red-400">{fieldErrors.username}</p>}
+                                </div>
 
-        </ThemeProvider>
+                                {/* Password */}
+                                <div>
+                                    <label className="block text-sm font-medium text-white-muted mb-1.5">Password</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <Lock size={18} className="text-white-darker" />
+                                        </div>
+                                        <input
+                                            type={showPassword ? "text" : "password"}
+                                            className={`w-full pl-10 pr-10 py-2 bg-navy-900 border ${fieldErrors.password ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                            placeholder="Enter your password"
+                                            value={password}
+                                            onChange={(e) => setPassword(e.target.value)}
+                                        />
+                                        <button
+                                            type="button"
+                                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-white-darker hover:text-white"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                        >
+                                            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                        </button>
+                                    </div>
+                                    {fieldErrors.password && <p className="mt-1 text-xs text-red-400">{fieldErrors.password}</p>}
+                                    
+                                    {/* Password Strength */}
+                                    {formState === 1 && password && (
+                                        <div className="mt-3">
+                                            <div className="flex gap-1 h-1.5 rounded-full overflow-hidden bg-navy-900">
+                                                {[1, 2, 3].map((level) => (
+                                                    <div 
+                                                        key={level} 
+                                                        className={`flex-1 transition-colors duration-300 ${strength >= level ? strengthColors[strength] : 'bg-transparent'}`} 
+                                                    />
+                                                ))}
+                                            </div>
+                                            <p className={`text-xs mt-1 font-medium ${strength >= 3 ? 'text-teal' : strength >= 2 ? 'text-yellow-500' : 'text-red-400'}`}>
+                                                {strengthLabels[strength]}
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Confirm Password (register only) */}
+                                {formState === 1 && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-white-muted mb-1.5">Confirm Password</label>
+                                        <div className="relative">
+                                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <Lock size={18} className="text-white-darker" />
+                                            </div>
+                                            <input
+                                                type={showConfirm ? "text" : "password"}
+                                                className={`w-full pl-10 pr-10 py-2 bg-navy-900 border ${fieldErrors.confirmPassword ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                                placeholder="Re-enter your password"
+                                                value={confirmPassword}
+                                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                            />
+                                            <button
+                                                type="button"
+                                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-white-darker hover:text-white"
+                                                onClick={() => setShowConfirm(!showConfirm)}
+                                            >
+                                                {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                                            </button>
+                                        </div>
+                                        {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-red-400">{fieldErrors.confirmPassword}</p>}
+                                    </div>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full py-2.5 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-lg transition-all transform hover:-translate-y-0.5 shadow-lg shadow-teal/20 flex items-center justify-center gap-2 mt-6"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-navy-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Processing...
+                                        </>
+                                    ) : (
+                                        formState === 0 ? "Sign In" : "Create Account"
+                                    )}
+                                </button>
+                            </motion.form>
+                        </AnimatePresence>
+                    </div>
+                </div>
+            </motion.div>
+        </div>
     );
 }

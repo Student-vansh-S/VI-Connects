@@ -1,98 +1,154 @@
-import axios from "axios";
-import httpStatus from "http-status";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import server from "../environment";
-
+import api from "../utils/api.js";
 
 export const AuthContext = createContext({});
 
-const client = axios.create({
-    baseURL: `${server}/api/v1/users`
-})
-
-
 export const AuthProvider = ({ children }) => {
+    const [user, setUser] = useState(null);
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [loading, setLoading] = useState(true);
 
-    const authContext = useContext(AuthContext);
+    const navigate = useNavigate();
 
+    /**
+     * On mount — check if user has a valid session
+     */
+    const checkAuth = useCallback(async () => {
+        const token = localStorage.getItem("accessToken");
+        if (!token) {
+            setLoading(false);
+            return;
+        }
 
-    const [userData, setUserData] = useState(authContext);
+        try {
+            const { data } = await api.get("/api/auth/me");
+            setUser(data.data.user);
+            setIsAuthenticated(true);
+        } catch {
+            localStorage.removeItem("accessToken");
+            setUser(null);
+            setIsAuthenticated(false);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
+    useEffect(() => {
+        checkAuth();
+    }, [checkAuth]);
 
-    const router = useNavigate();
-
+    /**
+     * Register a new user
+     */
     const handleRegister = async (name, username, password) => {
-        try {
-            let request = await client.post("/register", {
-                name: name,
-                username: username,
-                password: password
-            })
+        await api.post("/api/auth/register", {
+            name,
+            username,
+            password,
+        });
+        // Auto-login after successful registration
+        await handleLogin(username, password);
+    };
 
-
-            if (request.status === httpStatus.CREATED) {
-                return request.data.message;
-            }
-        } catch (err) {
-            throw err;
-        }
-    }
-
+    /**
+     * Login — stores access token, sets user state
+     */
     const handleLogin = async (username, password) => {
+        const { data } = await api.post("/api/auth/login", {
+            username,
+            password,
+        });
+
+        localStorage.setItem("accessToken", data.data.accessToken);
+        setUser(data.data.user);
+        setIsAuthenticated(true);
+        navigate("/home");
+    };
+
+    /**
+     * Logout — clears everything
+     */
+    const handleLogout = async () => {
         try {
-            let request = await client.post("/login", {
-                username: username,
-                password: password
-            });
-
-            console.log(username, password)
-            console.log(request.data)
-
-            if (request.status === httpStatus.OK) {
-                localStorage.setItem("token", request.data.token);
-                router("/home")
-            }
-        } catch (err) {
-            throw err;
+            await api.post("/api/auth/logout");
+        } catch {
+            // Even if API call fails, clear local state
+        } finally {
+            localStorage.removeItem("accessToken");
+            setUser(null);
+            setIsAuthenticated(false);
+            navigate("/auth");
         }
-    }
+    };
 
+    /**
+     * Get meeting history
+     */
     const getHistoryOfUser = async () => {
-        try {
-            let request = await client.get("/get_all_activity", {
-                params: {
-                    token: localStorage.getItem("token")
-                }
-            });
-            return request.data
-        } catch
-         (err) {
-            throw err;
-        }
-    }
+        const { data } = await api.get("/api/meeting/my-meetings");
+        return data.data;
+    };
 
+    /**
+     * Add to meeting history (legacy, disabled for new architecture)
+     */
     const addToUserHistory = async (meetingCode) => {
-        try {
-            let request = await client.post("/add_to_activity", {
-                token: localStorage.getItem("token"),
-                meeting_code: meetingCode
-            });
-            return request
-        } catch (e) {
-            throw e;
-        }
-    }
+        return { success: true };
+    };
 
+    /**
+     * Delete meeting from history
+     */
+    const deleteFromHistory = async (id) => {
+        const { data } = await api.delete(`/api/meeting/${id}`);
+        return data;
+    };
 
-    const data = {
-        userData, setUserData, addToUserHistory, getHistoryOfUser, handleRegister, handleLogin
-    }
+    /**
+     * Generate a new meeting (authenticated only)
+     */
+    const generateMeeting = async () => {
+        const { data } = await api.post("/api/meeting/generate");
+        return data.data.meetingCode;
+    };
+
+    /**
+     * Validate a meeting code exists on backend
+     */
+    const joinMeeting = async (meetingCode) => {
+        const { data } = await api.post("/api/meeting/join", { meetingCode });
+        return data.data;
+    };
+
+    const contextValue = {
+        user,
+        isAuthenticated,
+        loading,
+        handleRegister,
+        handleLogin,
+        handleLogout,
+        getHistoryOfUser,
+        addToUserHistory,
+        deleteFromHistory,
+        generateMeeting,
+        joinMeeting,
+    };
 
     return (
-        <AuthContext.Provider value={data}>
+        <AuthContext.Provider value={contextValue}>
             {children}
         </AuthContext.Provider>
-    )
+    );
+};
 
-}
+/**
+ * Custom hook for easy access to auth context
+ */
+export const useAuth = () => {
+    const context = useContext(AuthContext);
+    if (!context) {
+        throw new Error("useAuth must be used within an AuthProvider");
+    }
+    return context;
+};

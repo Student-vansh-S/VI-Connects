@@ -1,14 +1,23 @@
 import mongoose, { Schema } from "mongoose";
 
-const userScheme = new Schema(
+const userSchema = new Schema(
     {
-        name: { type: String, required: true },
-        username: { type: String, required: true, unique: true },
+        name: { type: String, required: true, trim: true },
+        username: { type: String, required: true, unique: true, trim: true, lowercase: true },
         password: { type: String, required: true },
-        token: { type: String }
-    }
-)
+        refreshToken: { type: String, default: null },
+    },
+    { timestamps: true }
+);
 
-const User = mongoose.model("User", userScheme);
+// Ensure password and refreshToken are never returned by default
+userSchema.methods.toJSON = function () {
+    const user = this.toObject();
+    delete user.password;
+    delete user.refreshToken;
+    return user;
+};
+
+const User = mongoose.model("User", userSchema);
 
 export { User };

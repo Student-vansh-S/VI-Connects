@@ -4,6 +4,7 @@ import { Server } from "socket.io"
 let connections = {}
 let messages = {}
 let timeOnline = {}
+let userIdentities = {}
 
 export const connectToSocket = (server) => {
     const io = new Server(server, {
@@ -20,12 +21,18 @@ export const connectToSocket = (server) => {
 
         console.log("SOMETHING CONNECTED")
 
-        socket.on("join-call", (path) => {
+        socket.on("join-call", (path, username) => {
 
             if (connections[path] === undefined) {
                 connections[path] = []
             }
             connections[path].push(socket.id)
+            
+            // Store the user identity securely mapped to their socket ID
+            userIdentities[socket.id] = {
+                name: username || "Guest",
+                meetingCode: path
+            };
 
             timeOnline[socket.id] = new Date();
 
@@ -33,8 +40,13 @@ export const connectToSocket = (server) => {
             //     io.to(elem)
             // })
 
+            const usersInRoom = connections[path].map(sid => ({
+                socketId: sid,
+                username: userIdentities[sid] ? userIdentities[sid].name : "Guest"
+            }));
+
             for (let a = 0; a < connections[path].length; a++) {
-                io.to(connections[path][a]).emit("user-joined", socket.id, connections[path])
+                io.to(connections[path][a]).emit("user-joined", socket.id, usersInRoom)
             }
 
             if (messages[path] !== undefined) {
@@ -50,30 +62,24 @@ export const connectToSocket = (server) => {
             io.to(toId).emit("signal", socket.id, message);
         })
 
-        socket.on("chat-message", (data, sender) => {
+        socket.on("chat-message", (data) => {
 
-            const [matchingRoom, found] = Object.entries(connections)
-                .reduce(([room, isFound], [roomKey, roomValue]) => {
+            // Get authoritative identity from backend memory instead of client payload
+            const identity = userIdentities[socket.id];
+            
+            if (identity) {
+                const matchingRoom = identity.meetingCode;
+                const senderName = identity.name;
 
-
-                    if (!isFound && roomValue.includes(socket.id)) {
-                        return [roomKey, true];
-                    }
-
-                    return [room, isFound];
-
-                }, ['', false]);
-
-            if (found === true) {
                 if (messages[matchingRoom] === undefined) {
                     messages[matchingRoom] = []
                 }
 
-                messages[matchingRoom].push({ 'sender': sender, "data": data, "socket-id-sender": socket.id })
-                console.log("message", matchingRoom, ":", sender, data)
+                messages[matchingRoom].push({ 'sender': senderName, "data": data, "socket-id-sender": socket.id })
+                console.log("message", matchingRoom, ":", senderName, data)
 
                 connections[matchingRoom].forEach((elem) => {
-                    io.to(elem).emit("chat-message", data, sender, socket.id)
+                    io.to(elem).emit("chat-message", data, senderName, socket.id)
                 })
             }
 
@@ -108,6 +114,10 @@ export const connectToSocket = (server) => {
 
             }
 
+            // Clean up the user identity mapping
+            if (userIdentities[socket.id]) {
+                delete userIdentities[socket.id];
+            }
 
         })
 
