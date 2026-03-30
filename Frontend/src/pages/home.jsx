@@ -72,9 +72,9 @@ function HomeComponent() {
     };
 
     return (
-        <div className="min-h-[calc(100vh-4rem)] p-4 sm:p-8 lg:p-12 relative overflow-hidden">
+        <div className="min-h-[calc(100vh-4rem)] p-4 sm:p-8 lg:p-12 relative overflow-hidden bg-background">
             {/* Background elements */}
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal/5 rounded-full blur-[100px] pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
             <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[100px] pointer-events-none translate-y-1/3 -translate-x-1/3"></div>
 
             <div className="max-w-6xl mx-auto relative z-10">
@@ -85,10 +85,10 @@ function HomeComponent() {
                     transition={{ duration: 0.6 }}
                     className="mb-12"
                 >
-                    <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
+                    <h1 className="text-3xl md:text-4xl font-extrabold text-textMain mb-2">
                         Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ""}!
                     </h1>
-                    <p className="text-white-muted text-lg">
+                    <p className="text-textMuted text-lg">
                         Start an instant meeting or join an existing one.
                     </p>
                 </motion.div>
@@ -101,15 +101,15 @@ function HomeComponent() {
                     className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 mb-12"
                 >
                     {/* New Meeting Card */}
-                    <motion.div variants={cardVariants} className="glass-panel p-8 rounded-3xl flex flex-col group relative overflow-hidden">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-teal/10 rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700"></div>
+                    <motion.div variants={cardVariants} className="bg-white border border-accent shadow-sm hover:shadow-md transition-shadow p-8 rounded-3xl flex flex-col group relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700"></div>
                         
-                        <div className="w-14 h-14 bg-teal/10 rounded-2xl flex items-center justify-center mb-6 relative z-10">
-                            <Plus size={28} className="text-teal" />
+                        <div className="w-14 h-14 bg-primary/10 rounded-2xl flex items-center justify-center mb-6 relative z-10">
+                            <Plus size={28} className="text-primary" />
                         </div>
                         
-                        <h2 className="text-2xl font-bold text-white mb-3 relative z-10">New Meeting</h2>
-                        <p className="text-white-muted mb-8 flex-grow relative z-10">
+                        <h2 className="text-2xl font-bold text-textMain mb-3 relative z-10">New Meeting</h2>
+                        <p className="text-textMuted mb-8 flex-grow relative z-10">
                             Generate a secure, unique meeting link to share with your team or clients instantly.
                         </p>
 
@@ -122,11 +122,11 @@ function HomeComponent() {
                                     exit={{ opacity: 0 }}
                                     onClick={handleGenerate}
                                     disabled={generating}
-                                    className="w-full py-3.5 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-xl transition-all shadow-lg shadow-teal/20 flex items-center justify-center gap-2 relative z-10"
+                                    className="w-full py-3.5 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 relative z-10"
                                 >
                                     {generating ? (
                                         <>
-                                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-navy-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                             </svg>
@@ -143,19 +143,19 @@ function HomeComponent() {
                                     animate={{ opacity: 1, height: "auto" }}
                                     className="space-y-4 relative z-10"
                                 >
-                                    <div className="flex items-center justify-between p-3.5 bg-navy-900 border border-navy-700 rounded-xl">
-                                        <code className="text-teal font-mono text-lg tracking-wider">{generatedCode}</code>
+                                    <div className="flex items-center justify-between p-3.5 bg-background border border-accent rounded-xl">
+                                        <code className="text-primary font-mono text-lg tracking-wider">{generatedCode}</code>
                                         <button 
                                             onClick={handleCopyLink}
-                                            className="p-2 bg-navy-800 hover:bg-navy-700 rounded-lg text-white-muted hover:text-white transition-colors flex items-center gap-2"
+                                            className="p-2 bg-accent hover:bg-accent-darker rounded-lg text-textMuted hover:text-textMain transition-colors flex items-center gap-2"
                                             title="Copy Link"
                                         >
-                                            {copied ? <Check size={18} className="text-teal" /> : <Copy size={18} />}
+                                            {copied ? <Check size={18} className="text-success" /> : <Copy size={18} />}
                                         </button>
                                     </div>
                                     <button 
                                         onClick={handleGoToMeeting}
-                                        className="w-full py-3.5 border border-teal text-teal hover:bg-teal hover:text-navy-900 font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                                        className="w-full py-3.5 border border-primary text-primary hover:bg-primary hover:text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
                                     >
                                         Join Room Now <ArrowRight size={18} />
                                     </button>
@@ -165,21 +165,21 @@ function HomeComponent() {
                     </motion.div>
 
                     {/* Join Meeting Card */}
-                    <motion.div variants={cardVariants} className="glass-panel p-8 rounded-3xl flex flex-col group relative overflow-hidden">
+                    <motion.div variants={cardVariants} className="bg-white border border-accent shadow-sm hover:shadow-md transition-shadow p-8 rounded-3xl flex flex-col group relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl -mr-10 -mt-10 transition-transform group-hover:scale-150 duration-700"></div>
                         
-                        <div className="w-14 h-14 bg-navy-800 border border-navy-700 rounded-2xl flex items-center justify-center mb-6 relative z-10">
-                            <Video size={28} className="text-white" />
+                        <div className="w-14 h-14 bg-background border border-accent rounded-2xl flex items-center justify-center mb-6 relative z-10">
+                            <Video size={28} className="text-primary" />
                         </div>
                         
-                        <h2 className="text-2xl font-bold text-white mb-3 relative z-10">Join a Meeting</h2>
-                        <p className="text-white-muted mb-8 flex-grow relative z-10">
+                        <h2 className="text-2xl font-bold text-textMain mb-3 relative z-10">Join a Meeting</h2>
+                        <p className="text-textMuted mb-8 flex-grow relative z-10">
                             Have an invite code? Enter it below to securely connect to your meeting room.
                         </p>
 
                         <div className="space-y-4 relative z-10">
                             {joinError && (
-                                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
                                     {joinError}
                                 </div>
                             )}
@@ -193,21 +193,21 @@ function HomeComponent() {
                                         setJoinError("");
                                     }}
                                     onKeyDown={(e) => e.key === "Enter" && handleJoin()}
-                                    className="w-full pl-4 pr-12 py-3.5 bg-navy-900 border border-navy-700 rounded-xl focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all font-mono tracking-wider"
+                                    className="w-full pl-4 pr-12 py-3.5 bg-white border border-accent rounded-xl shadow-sm focus:ring-2 focus:ring-primary focus:border-transparent text-textMain placeholder-textMuted outline-none transition-all font-mono tracking-wider"
                                 />
                                 <div className="absolute inset-y-0 right-0 flex items-center pr-2">
-                                    <div className="text-xs text-navy-700 font-bold bg-navy-800 px-2 py-1 rounded border border-navy-700">↵</div>
+                                    <div className="text-xs text-textMuted font-bold bg-accent px-2 py-1 rounded border border-accent-darker">↵</div>
                                 </div>
                             </div>
                             
                             <button
                                 onClick={handleJoin}
                                 disabled={joining || !meetingCode.trim()}
-                                className="w-full py-3.5 bg-white hover:bg-white-muted text-navy-900 font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full py-3.5 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {joining ? (
                                     <>
-                                        <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-navy-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
@@ -230,7 +230,7 @@ function HomeComponent() {
                 >
                     <button 
                         onClick={() => navigate("/history")}
-                        className="glass-panel hover:bg-navy-800 transition-colors px-6 py-3 rounded-xl flex items-center gap-3 text-white-muted hover:text-white"
+                        className="bg-white border border-accent shadow-sm hover:bg-accent-lighter transition-colors px-6 py-3 rounded-xl flex items-center gap-3 text-textMuted hover:text-textMain font-semibold"
                     >
                         <Clock size={18} />
                         View Meeting History
@@ -244,7 +244,7 @@ function HomeComponent() {
                                 window.location.href = "/";
                             }
                         }}
-                        className="sm:hidden glass-panel hover:bg-red-500/10 border-red-500/20 hover:border-red-500/30 transition-colors px-6 py-3 rounded-xl flex items-center gap-3 text-red-400"
+                        className="sm:hidden bg-white hover:bg-red-50 border border-red-200 transition-colors px-6 py-3 rounded-xl flex items-center gap-3 text-red-600 font-semibold shadow-sm"
                     >
                         <LogOut size={18} />
                         Sign Out

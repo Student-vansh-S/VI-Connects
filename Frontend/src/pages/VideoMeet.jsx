@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import server from '../environment';
 import { AuthContext } from '../contexts/AuthContext';
 import api from '../utils/api';
+import VideoTile from '../components/VideoTile';
 
 const server_url = server;
 var connections = {};
@@ -75,10 +76,21 @@ export default function VideoMeetComponent() {
 
         validateMeeting();
 
-        // Cleanup: disconnect socket on unmount
+        // Cleanup: disconnect socket and close all peer connections on unmount
         return () => {
             if (socketRef.current) {
                 socketRef.current.disconnect();
+            }
+            
+            // Close all active WebRTC connections
+            for (let id in connections) {
+                connections[id].close();
+                delete connections[id];
+            }
+
+            // Stop all local tracks
+            if (window.localStream) {
+                window.localStream.getTracks().forEach(track => track.stop());
             }
         };
     }, [isAuthenticated, user, searchParams, meetingCode]);
@@ -168,7 +180,16 @@ export default function VideoMeetComponent() {
         for (let id in connections) {
             if (id === socketIdRef.current) continue
 
-            connections[id].addStream(window.localStream)
+            // Replace tracks in existing senders (don't addTrack — causes duplicate sender errors in Chrome)
+            const senders = connections[id].getSenders();
+            stream.getTracks().forEach(track => {
+                const sender = senders.find(s => s.track && s.track.kind === track.kind);
+                if (sender) {
+                    sender.replaceTrack(track);
+                } else {
+                    connections[id].addTrack(track, window.localStream);
+                }
+            });
 
             connections[id].createOffer().then((description) => {
                 connections[id].setLocalDescription(description)
@@ -179,31 +200,39 @@ export default function VideoMeetComponent() {
             })
         }
 
-        stream.getTracks().forEach(track => track.onended = () => {
-            setVideo(false);
-            setAudio(false);
+        // Only attach onended to VIDEO tracks — audio must stay alive
+        stream.getVideoTracks().forEach(track => {
+            track.onended = () => {
+                console.log("[WebRTC] Video track ended. Replacing with black frame, keeping audio alive.");
+                setVideo(false);
 
-            try {
-                let tracks = localVideoref.current.srcObject.getTracks()
-                tracks.forEach(track => track.stop())
-            } catch (e) { console.log(e) }
+                // Replace only the ended video track with a black frame
+                const blackTrack = black();
+                
+                // Update local stream: remove dead video, add black, keep audio
+                const audioTrack = window.localStream.getAudioTracks()[0];
+                const newStream = new MediaStream();
+                newStream.addTrack(blackTrack);
+                if (audioTrack && audioTrack.readyState === 'live') {
+                    newStream.addTrack(audioTrack);
+                }
+                
+                window.localStream = newStream;
+                if (localVideoref.current) {
+                    localVideoref.current.srcObject = window.localStream;
+                }
 
-            let blackSilence = (...args) => new MediaStream([black(...args), silence()])
-            window.localStream = blackSilence()
-            localVideoref.current.srcObject = window.localStream
-
-            for (let id in connections) {
-                connections[id].addStream(window.localStream)
-
-                connections[id].createOffer().then((description) => {
-                    connections[id].setLocalDescription(description)
-                        .then(() => {
-                            socketRef.current.emit('signal', id, JSON.stringify({ 'sdp': connections[id].localDescription }))
-                        })
-                        .catch(e => console.log(e))
-                })
-            }
-        })
+                // Replace only the video sender for all peers — do NOT touch audio senders
+                for (let id in connections) {
+                    if (id === socketIdRef.current) continue;
+                    const senders = connections[id].getSenders();
+                    const videoSender = senders.find(s => s.track && s.track.kind === "video");
+                    if (videoSender) {
+                        videoSender.replaceTrack(blackTrack).catch(e => console.log(e));
+                    }
+                }
+            };
+        });
     }
 
     let getUserMedia = () => {
@@ -256,117 +285,166 @@ export default function VideoMeetComponent() {
         socketRef.current.on('chat-message', addMessage)
 
         socketRef.current.on('user-left', (id) => {
+            console.log(`[WebRTC] User left: ${id}. Cleaning up connection.`);
+            
+            // Properly close the peer connection to avoid memory leaks
+            if (connections[id]) {
+                connections[id].close();
+                delete connections[id];
+            }
+
             setVideos((videos) => videos.filter((video) => video.socketId !== id))
         })
 
         socketRef.current.on('connect', () => {
+            console.log("[Socket] Connected. Joining call...");
             // Send username directly to the backend mapping on join
-            socketRef.current.emit('join-call', window.location.href, username)
+            socketRef.current.emit('join-call', meetingCode, username)
             socketIdRef.current = socketRef.current.id
+        })
 
-            socketRef.current.on('user-joined', (id, clients) => {
-                clients.forEach((clientInfo) => {
-                    let socketListId = typeof clientInfo === 'string' ? clientInfo : clientInfo.socketId;
-                    let clientUsername = typeof clientInfo === 'string' ? "Participant" : clientInfo.username;
+        socketRef.current.on('user-joined', (id, clients) => {
+            console.log(`[Socket] User joined event: ${id}`);
+            clients.forEach((clientInfo) => {
+                let socketListId = typeof clientInfo === 'string' ? clientInfo : clientInfo.socketId;
+                let clientUsername = typeof clientInfo === 'string' ? "Participant" : clientInfo.username;
 
-                    connections[socketListId] = new RTCPeerConnection(peerConfigConnections)
-                    // Wait for their ice candidate       
-                    connections[socketListId].onicecandidate = function (event) {
-                        if (event.candidate != null) {
-                            socketRef.current.emit('signal', socketListId, JSON.stringify({ 'ice': event.candidate }))
-                        }
-                    }
+                if (connections[socketListId]) return; // Skip if already connected
 
-                    // Wait for their video stream
-                    connections[socketListId].ontrack = (event) => {
-                        console.log("[WebRTC] Received remote track:", event.track.kind);
-                        
-                        setVideos(prevVideos => {
-                            let existingVideoIndex = prevVideos.findIndex(video => video.socketId === socketListId);
-
-                            if (existingVideoIndex !== -1) {
-                                // Accumulate new track into the existing video stream safely without duplicating state keys!
-                                let existingStream = prevVideos[existingVideoIndex].stream;
-
-                                if (event.streams && event.streams[0]) {
-                                    event.streams[0].getTracks().forEach(track => {
-                                        if (!existingStream.getTracks().includes(track)) {
-                                            existingStream.addTrack(track);
-                                        }
-                                    });
-                                } else {
-                                    // Fallback for browsers returning track explicitly
-                                    if (!existingStream.getTracks().includes(event.track)) {
-                                        existingStream.addTrack(event.track);
-                                    }
-                                }
-
-                                console.log(`[WebRTC] Attached ${event.track.kind} track to existing video object safely for ${socketListId}.`);
-                                
-                                // Return the exact same reference: React skips the render, but the DOM <video> element instantly pulls active track bytes!
-                                return prevVideos;
-                            } else {
-                                // This is the first track arriving for this user. Create their remote UI container safely.
-                                console.log(`[WebRTC] Creating new participant stream for ${socketListId} starting with ${event.track.kind} track.`);
-                                
-                                let newStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
-                                let newVideo = {
-                                    socketId: socketListId,
-                                    stream: newStream,
-                                    username: clientUsername,
-                                    autoplay: true,
-                                    playsinline: true,
-                                    autoplayFailed: false
-                                };
-
-                                const updatedVideos = [...prevVideos, newVideo];
-                                videoRef.current = updatedVideos;
-                                return updatedVideos;
-                            }
-                        });
-                    };
-
-                    // Add the local video stream using modern addTrack iteration.
-                    if (window.localStream !== undefined && window.localStream !== null) {
-                        window.localStream.getTracks().forEach(track => {
-                            connections[socketListId].addTrack(track, window.localStream);
-                        });
-                    } else {
-                        let blackSilence = (...args) => new MediaStream([black(...args), silence()])
-                        window.localStream = blackSilence()
-                        connections[socketListId].addStream(window.localStream)
-                    }
-                })
-
-                if (id === socketIdRef.current) {
-                    for (let id2 in connections) {
-                        if (id2 === socketIdRef.current) continue
-
-                        try {
-                            window.localStream.getTracks().forEach(track => {
-                                connections[id2].addTrack(track, window.localStream);
-                            });
-                        } catch (e) { }
-
-                        connections[id2].createOffer().then((description) => {
-                            connections[id2].setLocalDescription(description)
-                                .then(() => {
-                                    socketRef.current.emit('signal', id2, JSON.stringify({ 'sdp': connections[id2].localDescription }))
-                                })
-                                .catch(e => console.log(e))
-                        })
+                console.log(`[WebRTC] Initializing PeerConnection for: ${socketListId}`);
+                connections[socketListId] = new RTCPeerConnection(peerConfigConnections)
+                
+                // Wait for their ice candidate       
+                connections[socketListId].onicecandidate = function (event) {
+                    if (event.candidate != null) {
+                        socketRef.current.emit('signal', socketListId, JSON.stringify({ 'ice': event.candidate }))
                     }
                 }
+
+                // Wait for their video/audio stream
+                connections[socketListId].ontrack = (event) => {
+                    const track = event.track;
+                    console.log(`[WebRTC] Received remote track:`, track.kind, track.id);
+                    console.log(`[WebRTC] Track state: ${track.readyState}, muted: ${track.muted}, enabled: ${track.enabled}`);
+                    
+                    setVideos(prevVideos => {
+                        let existingVideoIndex = prevVideos.findIndex(v => v.socketId === socketListId);
+
+                            if (existingVideoIndex !== -1) {
+                                // Accumulate new track into the existing video stream safely
+                                const existingVid = prevVideos[existingVideoIndex];
+                                let existingStream = existingVid.stream;
+
+                                // Ensure the track is NOT already in the stream (check by ID)
+                                const hasTrack = existingStream.getTracks().some(t => t.id === track.id);
+                                if (!hasTrack) {
+                                    existingStream.addTrack(track);
+                                    console.log(`[WebRTC] Appended new ${track.kind} track to stream for ${socketListId}`);
+                                }
+
+                                // Also sync any other tracks in the event's streams if present
+                                if (event.streams && event.streams[0]) {
+                                    event.streams[0].getTracks().forEach(t => {
+                                        if (!existingStream.getTracks().some(et => et.id === t.id)) {
+                                            existingStream.addTrack(t);
+                                            console.log(`[WebRTC] Appended bundled ${t.kind} track to ${socketListId}`);
+                                        }
+                                    });
+                                }
+
+                                // CRITICAL Chrome Fix: Create a FRESH MediaStream instance to force re-binding of srcObject
+                                // This "nudges" the browser to activate the audio engine for an already playing element.
+                                const refreshedStream = new MediaStream(existingStream.getTracks());
+                                
+                                const updatedVideos = [...prevVideos];
+                                updatedVideos[existingVideoIndex] = {
+                                    ...existingVid,
+                                    stream: refreshedStream
+                                };
+
+                                console.log(`[WebRTC] Forced stream refresh for ${socketListId} to activate ${track.kind} track.`);
+                                
+                                // Nudge video playback after React re-renders with the new stream ref.
+                                // Video stays muted — remote audio is handled by Web Audio API in VideoTile.
+                                setTimeout(() => {
+                                    const vidEl = document.querySelector(`video[data-socket="${socketListId}"]`);
+                                    if (vidEl) {
+                                        vidEl.play().catch(e => {
+                                            if (e.name !== 'AbortError') {
+                                                console.warn("[WebRTC] Delayed track play failed:", e.name);
+                                            }
+                                        });
+                                    }
+                                }, 150);
+
+                                return updatedVideos; 
+                            } else {
+                            // First track arriving for this participant
+                            console.log(`[WebRTC] Creating new participant UI for ${socketListId} starting with ${track.kind}`);
+                            
+                            let remoteStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([track]);
+                            let newVideo = {
+                                socketId: socketListId,
+                                stream: remoteStream,
+                                username: clientUsername,
+                                autoplay: true,
+                                playsinline: true,
+                                autoplayFailed: false
+                            };
+
+                            return [...prevVideos, newVideo];
+                        }
+                    });
+                };
+
+                // Add the local video stream using modern addTrack iteration.
+                if (window.localStream !== undefined && window.localStream !== null) {
+                    window.localStream.getTracks().forEach(track => {
+                        connections[socketListId].addTrack(track, window.localStream);
+                    });
+                } else {
+                    let blackSilence = (...args) => new MediaStream([black(...args), silence()])
+                    window.localStream = blackSilence()
+                    window.localStream.getTracks().forEach(track => {
+                        connections[socketListId].addTrack(track, window.localStream);
+                    });
+                }
             })
+
+            // If WE are the one who just joined, initiate offers to everyone else
+            if (id === socketIdRef.current) {
+                console.log("[WebRTC] We joined. Initiating offers to all existing peers.");
+                for (let id2 in connections) {
+                    if (id2 === socketIdRef.current) continue
+
+                    try {
+                        window.localStream.getTracks().forEach(track => {
+                            connections[id2].addTrack(track, window.localStream);
+                        });
+                    } catch (e) { }
+
+                    connections[id2].createOffer().then((description) => {
+                        connections[id2].setLocalDescription(description)
+                            .then(() => {
+                                socketRef.current.emit('signal', id2, JSON.stringify({ 'sdp': connections[id2].localDescription }))
+                            })
+                            .catch(e => console.log(e))
+                    })
+                }
+            }
         })
     }
 
     let silence = () => {
-        let ctx = new AudioContext()
+        if (!window.audioCtx) {
+            window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        let ctx = window.audioCtx;
+        if (ctx.state === 'suspended') ctx.resume();
+        
         let oscillator = ctx.createOscillator()
         let dst = oscillator.connect(ctx.createMediaStreamDestination())
         oscillator.start()
-        ctx.resume()
         return Object.assign(dst.stream.getAudioTracks()[0], { enabled: false })
     }
     let black = ({ width = 640, height = 480 } = {}) => {
@@ -393,77 +471,109 @@ export default function VideoMeetComponent() {
             });
             console.log("[WebRTC] Audio track enabled:", !audio);
         }
+        // Interaction trigger to ensure audio engine is active
+        unlockAudio();
     }
 
     let stopScreenShare = async () => {
         try {
+            console.log("[WebRTC] Stopping screen share, restoring camera...");
             // Re-acquire camera stream natively
-            const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            const cameraStream = await navigator.mediaDevices.getUserMedia({ 
+                video: video, // Respect current video toggle state
+                audio: true   // Always request audio to ensure we get a fresh track
+            });
             const cameraTrack = cameraStream.getVideoTracks()[0];
+            const cameraAudioTrack = cameraStream.getAudioTracks()[0];
             
-            // Respect previous video toggle state!
-            cameraTrack.enabled = video; 
-
-            // Hot-swap back to camera without re-negotiating the handshake
+            // Hot-swap BOTH video AND audio senders for all remote peers
             for (let id in connections) {
                 if (id === socketIdRef.current) continue;
-                const videoSender = connections[id].getSenders().find(s => s.track && s.track.kind === "video");
-                if (videoSender) {
-                    videoSender.replaceTrack(cameraTrack);
-                    console.log(`[WebRTC] Replaced Track back to Camera for ${id}`);
+                const senders = connections[id].getSenders();
+                
+                // Replace video sender with camera track
+                const videoSender = senders.find(s => s.track && s.track.kind === "video");
+                if (videoSender && cameraTrack) {
+                    await videoSender.replaceTrack(cameraTrack);
+                }
+                
+                // Replace audio sender with the new audio track
+                // (the old audio track will be .stop()'d below, so we must swap first)
+                const audioSender = senders.find(s => s.track && s.track.kind === "audio");
+                if (audioSender && cameraAudioTrack) {
+                    await audioSender.replaceTrack(cameraAudioTrack);
+                    console.log(`[WebRTC] Replaced audio track for peer: ${id}`);
                 }
             }
 
-            // Sync visual UI securely
-            try {
-                window.localStream.getVideoTracks().forEach(track => track.stop());
-            } catch (e) { console.log(e) }
+            // Now safe to stop old tracks — peers have been given the new ones
+            if (window.localStream) {
+                window.localStream.getTracks().forEach(track => track.stop());
+            }
 
-            window.localStream = new MediaStream([cameraTrack, window.localStream.getAudioTracks()[0]]);
-            localVideoref.current.srcObject = window.localStream;
+            // Build new local stream for UI
+            const newStream = new MediaStream();
+            if (cameraTrack) newStream.addTrack(cameraTrack);
+            if (cameraAudioTrack) newStream.addTrack(cameraAudioTrack);
+
+            window.localStream = newStream;
             setScreen(false);
-            console.log("[WebRTC] Successfully restored Camera stream.");
+            
+            // Respect the user's current audio toggle
+            if (!audio && cameraAudioTrack) {
+                cameraAudioTrack.enabled = false;
+            }
+            
+            console.log("[WebRTC] Camera stream restored successfully.");
         } catch (error) {
             console.error("[WebRTC] Failed to restore camera after screen share", error);
+            setScreen(false);
         }
     };
 
     let handleScreen = async () => {
         if (!screen) {
             try {
-                // Fetch just video tracking payload
+                console.log("[WebRTC] Initiating screen share...");
                 const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
                 const screenTrack = screenStream.getVideoTracks()[0];
 
-                // Hot-swap into remote peers
-                for (let id in connections) {
-                    if (id === socketIdRef.current) continue;
-                    const videoSender = connections[id].getSenders().find(s => s.track && s.track.kind === "video");
-                    if (videoSender) {
-                        videoSender.replaceTrack(screenTrack);
-                        console.log(`[WebRTC] Broadcasted Screen Track to ${id}`);
-                    }
-                }
-
+                // Auto-stop if user clicks "Stop sharing" in browser UI
                 screenTrack.onended = () => {
+                    console.log("[WebRTC] Screen track ended via browser UI.");
                     stopScreenShare();
                 };
 
-                // Sync local displays securely 
-                try {
-                    window.localStream.getVideoTracks().forEach(track => track.stop());
-                } catch (e) { console.log(e) }
+                // Hot-swap screen track into all active peer connections
+                for (let id in connections) {
+                    if (id === socketIdRef.current) continue;
+                    const senders = connections[id].getSenders();
+                    const videoSender = senders.find(s => s.track && s.track.kind === "video");
+                    if (videoSender) {
+                        await videoSender.replaceTrack(screenTrack);
+                        console.log(`[WebRTC] Replaced video track with screen for: ${id}`);
+                    }
+                }
 
-                window.localStream = new MediaStream([screenTrack, window.localStream.getAudioTracks()[0]]);
-                localVideoref.current.srcObject = window.localStream;
+                // Update local preview with a FRESH MediaStream reference
+                const newLocalStream = new MediaStream([screenTrack]);
+                // Preserve audio if possible
+                const audioTrack = window.localStream?.getAudioTracks()[0];
+                if (audioTrack) newLocalStream.addTrack(audioTrack);
+
+                // Stop old video tracks
+                if (window.localStream) {
+                    window.localStream.getVideoTracks().forEach(t => t.stop());
+                }
+
+                window.localStream = newLocalStream;
                 setScreen(true);
-                console.log("[WebRTC] Screen sharing active natively.");
+                console.log("[WebRTC] Screen sharing active.");
             } catch (error) {
-                console.log("[WebRTC] Screen share failed or cancelled", error);
+                console.error("[WebRTC] Screen share initiation failed:", error);
                 setScreen(false);
             }
         } else {
-            // Trigger loop termination physically
             stopScreenShare();
         }
     };
@@ -511,9 +621,53 @@ export default function VideoMeetComponent() {
         setMessage("");
     }
 
+    const unlockAudio = () => {
+        // Resume AudioContext if suspended (Chrome blocks this until user gesture)
+        if (window.audioCtx && window.audioCtx.state === 'suspended') {
+            window.audioCtx.resume().then(() => {
+                console.log("[WebRTC] AudioContext resumed successfully.");
+            });
+        }
+
+        // Ensure all remote <video> elements are unmuted and playing
+        document.querySelectorAll("video").forEach(v => {
+            // Never unmute local video (causes echo)
+            if (!v.muted) {
+                v.volume = 1;
+            }
+            v.play().catch(e => {
+                if (e.name !== 'AbortError') console.warn("[WebRTC] Failed to unlock video:", e.name);
+            });
+        });
+    };
+
+    // Chrome Autoplay Policy / Audio Unlock mechanism
+    // Use a PERSISTENT listener (not {once: true}) because remote streams may arrive
+    // after the first user click. The listener stays active for the entire meeting.
+    useEffect(() => {
+        const handler = () => unlockAudio();
+        document.addEventListener("click", handler);
+        document.addEventListener("keydown", handler, { once: true });
+        return () => {
+            document.removeEventListener("click", handler);
+            document.removeEventListener("keydown", handler);
+        };
+    }, []);
+
     let connect = async () => {
         if (!username.trim()) return;
         
+        // Initialize/Resume AudioContext early
+        try {
+            if (!window.audioCtx) {
+                window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (window.audioCtx.state === 'suspended') {
+                window.audioCtx.resume();
+            }
+            console.log("[WebRTC] Initialized/Resumed global AudioContext for meeting.");
+        } catch (e) { console.error("AudioContext init failed", e); }
+
         // Save to history if authenticated
         if (isAuthenticated) {
             try {
@@ -562,49 +716,49 @@ export default function VideoMeetComponent() {
 
     if (joinStep === 'lobby') {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-navy-900 p-4 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-teal/5 rounded-full blur-[100px] pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
-                <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/5 rounded-full blur-[100px] pointer-events-none translate-y-1/3 -translate-x-1/3"></div>
+            <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
+                <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-400/5 rounded-full blur-[100px] pointer-events-none translate-y-1/3 -translate-x-1/3"></div>
                 
                 <motion.div 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="glass-panel w-full max-w-md p-8 rounded-2xl relative z-10"
+                    className="bg-white border border-accent shadow-sm w-full max-w-md p-8 rounded-2xl relative z-10"
                 >
                     <div className="text-center mb-8">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-teal/10 text-teal mb-4">
+                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary mb-4 shadow-sm">
                             <Video size={24} />
                         </div>
-                        <h1 className="text-2xl font-bold text-white mb-2">Join Meeting</h1>
-                        <p className="text-sm text-white-muted">Room Code: <span className="font-mono text-teal">{meetingCode}</span></p>
+                        <h1 className="text-2xl font-bold text-textMain mb-2">Join Meeting</h1>
+                        <p className="text-sm text-textMuted">Room Code: <span className="font-mono text-primary font-bold">{meetingCode}</span></p>
                     </div>
 
                     {isAuthenticated && user ? (
                         <div className="space-y-6">
-                            <div className="bg-navy-800 border border-navy-700 rounded-xl p-4 flex items-center gap-4">
-                                <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 font-bold">
+                            <div className="bg-background border border-accent rounded-xl p-4 flex items-center gap-4">
+                                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-primary font-bold shadow-inner">
                                     {username.charAt(0).toUpperCase()}
                                 </div>
                                 <div className="flex-1">
-                                    <p className="text-sm text-white-muted">Joining as</p>
-                                    <p className="font-semibold text-white">{username}</p>
+                                    <p className="text-sm text-textMuted font-medium">Joining as</p>
+                                    <p className="font-bold text-textMain">{username}</p>
                                 </div>
                             </div>
                             <button 
                                 onClick={connect}
-                                className="w-full py-3.5 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-xl transition-all shadow-lg"
+                                className="w-full py-3.5 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm"
                             >
                                 Enter Room Now
                             </button>
                         </div>
                     ) : (
                         <div className="space-y-5">
-                            <p className="text-center text-sm text-white-muted mb-2">You are joining as a guest. Please enter your name.</p>
+                            <p className="text-center text-sm text-textMuted mb-2 font-medium">You are joining as a guest. Please enter your name.</p>
                             <div>
-                                <label className="block text-sm font-medium text-white-muted mb-1.5">Your Name</label>
+                                <label className="block text-sm font-semibold text-textMain mb-1.5">Your Name</label>
                                 <input
                                     type="text"
-                                    className="w-full px-4 py-2.5 bg-navy-900 border border-navy-700 rounded-lg focus:ring-2 focus:ring-teal text-white outline-none transition-all"
+                                    className="w-full px-4 py-2.5 bg-white border border-accent rounded-xl focus:ring-2 focus:ring-primary text-textMain outline-none transition-all shadow-sm placeholder-textMuted"
                                     placeholder="Enter your name"
                                     value={username}
                                     onChange={e => setUsername(e.target.value)}
@@ -614,12 +768,12 @@ export default function VideoMeetComponent() {
                             <button 
                                 onClick={connect}
                                 disabled={!username.trim()}
-                                className="w-full py-3.5 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-xl transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full py-3.5 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 Join as Guest
                             </button>
-                            <p className="text-center mt-4 text-sm text-white-darker">
-                                Have an account? <span className="text-teal hover:text-teal-light cursor-pointer font-medium transition-colors" onClick={() => navigate(`/auth?returnTo=/meeting/${meetingCode}`)}>Sign In</span>
+                            <p className="text-center mt-4 text-sm text-textMuted">
+                                Have an account? <span className="text-primary hover:text-primary-hover cursor-pointer font-bold transition-colors" onClick={() => navigate(`/auth?returnTo=/meeting/${meetingCode}`)}>Sign In</span>
                             </p>
                         </div>
                     )}
@@ -643,79 +797,35 @@ export default function VideoMeetComponent() {
 
     // ACTIVE MEETING UI
     return (
-        <div className="h-screen w-full bg-navy-900 overflow-hidden flex flex-col relative">
+        <div className="h-screen w-full bg-background overflow-hidden flex flex-col relative">
             
             {/* Header / Info bar (Floating) */}
-            <div className="absolute top-4 left-4 z-20 glass-panel px-4 py-2 rounded-lg flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-teal animate-pulse"></div>
-                <span className="font-mono text-white text-sm tracking-widest">{meetingCode}</span>
+            <div className="absolute top-4 left-4 z-20 bg-white/90 backdrop-blur-md border border-accent px-4 py-2 rounded-lg flex items-center gap-3 shadow-sm">
+                <div className="w-2 h-2 rounded-full bg-success animate-pulse"></div>
+                <span className="font-mono text-textMain text-sm font-bold tracking-widest">{meetingCode}</span>
             </div>
 
             {/* Main Video Area */}
             <div className={`flex-1 flex overflow-hidden ${showModal ? 'w-[calc(100%-350px)]' : 'w-full'} transition-all duration-300`}>
                 <div className="flex-1 p-4 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-fr items-center justify-center content-center w-full h-[calc(100vh-80px)]">
                     
-                    {/* Local Video */}
-                    <div className="relative w-full h-full min-h-[200px] bg-navy-800 rounded-2xl overflow-hidden border border-navy-700 shadow-xl group">
-                        <video 
-                            ref={localVideoref} 
-                            autoPlay 
-                            muted 
-                            playsInline
-                            className={`w-full h-full object-cover ${!videoAvailable ? 'hidden' : ''}`}
-                        ></video>
-                        {!videoAvailable && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-navy-800">
-                                <div className="w-16 h-16 bg-navy-700 rounded-full flex items-center justify-center mb-2">
-                                    <span className="text-2xl text-white font-bold">{username.charAt(0).toUpperCase()}</span>
-                                </div>
-                            </div>
-                        )}
-                        <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-md px-3 py-1 rounded-md text-white text-sm font-medium z-10 flex items-center gap-2">
-                            {username} (You)
-                            {!audioAvailable && <MicOff size={14} className="text-red-400" />}
-                        </div>
-                    </div>
+                    {/* Local Video Component Implementation */}
+                    <VideoTile 
+                        isLocal={true}
+                        username={username}
+                        videoAvailable={videoAvailable}
+                        audioAvailable={audioAvailable}
+                    />
 
                     {/* Remote Videos */}
                     {videos.map((vid) => (
-                        <div key={vid.socketId} className="relative w-full h-full min-h-[200px] bg-navy-800 rounded-2xl overflow-hidden border border-navy-700 shadow-xl group">
-                            <video
-                                data-socket={vid.socketId}
-                                ref={ref => {
-                                    if (ref) {
-                                        if (ref.srcObject !== vid.stream) {
-                                            ref.srcObject = vid.stream;
-                                            console.log(`[WebRTC] Assigned stream to video element for ${vid.socketId}`);
-                                        }
-                                        ref.play().catch(e => {
-                                            console.warn("[WebRTC] Chrome blocked AutoPlay:", e);
-                                            if (!vid.autoplayFailed) handleAutoplayFailure(vid.socketId);
-                                        });
-                                    }
-                                }}
-                                autoPlay
-                                playsInline
-                                muted={false}
-                                className="w-full h-full object-cover"
-                            ></video>
-
-                            {vid.autoplayFailed && (
-                                <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-20 backdrop-blur-sm">
-                                    <button 
-                                        onClick={() => retryAutoplay(vid.socketId)}
-                                        className="px-6 py-3 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-lg transition-colors flex items-center gap-2 shadow-xl"
-                                    >
-                                        <Volume2 size={20} />
-                                        Click to Enable Audio
-                                    </button>
-                                </div>
-                            )}
-
-                            <div className="absolute bottom-4 left-4 bg-black/50 backdrop-blur-md px-3 py-1 rounded-md text-white text-sm font-medium z-10">
-                                {vid.username || "Participant"}
-                            </div>
-                        </div>
+                        <VideoTile
+                            key={vid.socketId}
+                            vid={vid}
+                            retryAutoplay={retryAutoplay}
+                            onAutoplayFailure={handleAutoplayFailure}
+                            isLocal={false}
+                        />
                     ))}
                 </div>
             </div>
@@ -728,22 +838,22 @@ export default function VideoMeetComponent() {
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: 350, opacity: 0 }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                        className="absolute right-0 top-0 w-[350px] h-[calc(100vh-80px)] bg-navy-800 border-l border-navy-700 flex flex-col shadow-2xl z-20"
+                        className="absolute right-0 top-0 w-[350px] h-[calc(100vh-80px)] bg-white border-l border-accent flex flex-col shadow-2xl z-20"
                     >
-                        <div className="p-4 border-b border-navy-700 flex justify-between items-center bg-navy-900">
-                            <h2 className="text-white font-bold flex items-center gap-2">
-                                <MessageSquare size={18} className="text-teal" /> In-call Messages
+                        <div className="p-4 border-b border-accent flex justify-between items-center bg-background">
+                            <h2 className="text-textMain font-bold flex items-center gap-2">
+                                <MessageSquare size={18} className="text-primary" /> In-call Messages
                             </h2>
-                            <button onClick={closeChat} className="text-white-muted hover:text-white transition-colors">
+                            <button onClick={closeChat} className="text-textMuted hover:text-textMain transition-colors">
                                 <X size={20} />
                             </button>
                         </div>
                         
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-navy-800">
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white/50">
                             {messages.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-white-muted opacity-50">
+                                <div className="h-full flex flex-col items-center justify-center text-textMuted opacity-60">
                                     <MessageSquare size={32} className="mb-2" />
-                                    <p className="text-sm">No messages yet.</p>
+                                    <p className="text-sm font-medium">No messages yet.</p>
                                     <p className="text-xs mt-1">Say hi to everyone!</p>
                                 </div>
                             ) : (
@@ -751,8 +861,8 @@ export default function VideoMeetComponent() {
                                     const isMe = item.sender === username;
                                     return (
                                         <div key={index} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                            <span className="text-xs text-white-muted mb-1 ml-1">{isMe ? "You" : item.sender}</span>
-                                            <div className={`px-4 py-2 rounded-2xl max-w-[85%] ${isMe ? 'bg-teal text-navy-900 rounded-tr-sm' : 'bg-navy-700 text-white rounded-tl-sm'}`}>
+                                            <span className="text-xs text-textMuted mb-1 ml-1 font-semibold">{isMe ? "You" : item.sender}</span>
+                                            <div className={`px-4 py-2 rounded-2xl max-w-[85%] shadow-sm ${isMe ? 'bg-primary text-white rounded-tr-sm' : 'bg-background border border-accent text-textMain rounded-tl-sm'}`}>
                                                 <p className="text-sm break-words">{item.data}</p>
                                             </div>
                                         </div>
@@ -761,19 +871,19 @@ export default function VideoMeetComponent() {
                             )}
                         </div>
 
-                        <div className="p-4 bg-navy-900 border-t border-navy-700">
+                        <div className="p-4 bg-background border-t border-accent">
                             <form onSubmit={sendMessage} className="flex gap-2">
                                 <input 
                                     type="text" 
                                     value={message}
                                     onChange={handleMessage}
                                     placeholder="Send a message..."
-                                    className="flex-1 bg-navy-800 border border-navy-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-teal transition-colors"
+                                    className="flex-1 bg-white border border-accent rounded-lg px-3 py-2 text-textMain text-sm focus:outline-none focus:border-primary transition-colors shadow-sm"
                                 />
                                 <button 
                                     type="submit"
                                     disabled={!message.trim()}
-                                    className="bg-teal hover:bg-teal-hover text-navy-900 p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                    className="bg-primary hover:bg-primary-hover text-white p-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-sm"
                                 >
                                     <Send size={18} />
                                 </button>
@@ -784,12 +894,12 @@ export default function VideoMeetComponent() {
             </AnimatePresence>
 
             {/* Bottom Control Bar */}
-            <div className="h-[80px] w-full bg-navy-900 border-t border-navy-800 flex items-center justify-center px-4 z-30">
+            <div className="h-[80px] w-full bg-white border-t border-accent flex items-center justify-center px-4 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                 <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
                     {/* Audio */}
                     <button 
                         onClick={handleAudio} 
-                        className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${audio ? 'bg-navy-700 text-white hover:bg-navy-600' : 'bg-red-500 text-white hover:bg-red-600'}`}
+                        className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${audio ? 'bg-accent hover:bg-accent-darker text-textMain' : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'}`}
                         title={audio ? "Mute Microphone" : "Unmute Microphone"}
                     >
                         {audio ? <Mic size={22} /> : <MicOff size={22} />}
@@ -798,7 +908,7 @@ export default function VideoMeetComponent() {
                     {/* Video */}
                     <button 
                         onClick={handleVideo} 
-                        className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${video ? 'bg-navy-700 text-white hover:bg-navy-600' : 'bg-red-500 text-white hover:bg-red-600'}`}
+                        className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${video ? 'bg-accent hover:bg-accent-darker text-textMain' : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'}`}
                         title={video ? "Turn Off Camera" : "Turn On Camera"}
                     >
                         {video ? <Video size={22} /> : <VideoOff size={22} />}
@@ -808,7 +918,7 @@ export default function VideoMeetComponent() {
                     {screenAvailable && (
                         <button 
                             onClick={handleScreen} 
-                            className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-lg hidden sm:flex ${screen ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-navy-700 text-white hover:bg-navy-600'}`}
+                            className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm hidden sm:flex ${screen ? 'bg-primary text-white hover:bg-primary-hover shadow-primary/30' : 'bg-accent hover:bg-accent-darker text-textMain'}`}
                             title={screen ? "Stop Sharing" : "Share Screen"}
                         >
                             {screen ? <MonitorOff size={22} /> : <MonitorUp size={22} />}
@@ -821,23 +931,23 @@ export default function VideoMeetComponent() {
                             if(showModal) closeChat();
                             else openChat();
                         }} 
-                        className={`relative w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${showModal ? 'bg-teal text-navy-900 border-2 border-navy-900' : 'bg-navy-700 text-white hover:bg-navy-600'}`}
+                        className={`relative w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${showModal ? 'bg-primary text-white border-white' : 'bg-accent hover:bg-accent-darker text-textMain'}`}
                         title="Chat"
                     >
                         <MessageSquare size={22} />
                         {newMessages > 0 && !showModal && (
-                            <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-navy-900 transform translate-x-1 -translate-y-1">
+                            <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white transform translate-x-1 -translate-y-1">
                                 {newMessages > 9 ? '9+' : newMessages}
                             </span>
                         )}
                     </button>
 
-                    <div className="w-[1px] h-8 bg-navy-700 mx-2"></div>
+                    <div className="w-[1px] h-8 bg-accent-darker mx-2"></div>
 
                     {/* Leave Call */}
                     <button 
                         onClick={handleEndCall} 
-                        className="px-6 h-12 md:h-14 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center gap-2 font-bold shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all"
+                        className="px-6 h-12 md:h-14 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center gap-2 font-bold shadow-md transition-all"
                         title="Leave Call"
                     >
                         <PhoneOff size={22} />

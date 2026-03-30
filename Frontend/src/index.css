@@ -6,18 +6,18 @@
 
 @layer base {
   body {
-    @apply bg-[#0A192F] text-[#CCD6F6] font-sans antialiased;
+    @apply bg-background text-textMain font-sans antialiased;
     margin: 0;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    @apply text-white font-semibold tracking-tight;
+    @apply text-textMain font-semibold tracking-tight;
   }
 }
 
-/* Custom Utilities that Tailwind doesn't have by default */
+/* Custom Utilities */
 @layer utilities {
   .glass-panel {
-    @apply bg-[#112240]/80 backdrop-blur-md border border-[#233554] shadow-xl;
+    @apply bg-white/90 backdrop-blur-md border border-accent shadow-sm;
   }
 }

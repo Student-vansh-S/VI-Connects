@@ -17,7 +17,7 @@ function getPasswordStrength(password) {
 }
 
 const strengthLabels = ["", "Weak", "Medium", "Strong"];
-const strengthColors = ["bg-navy-700", "bg-red-500", "bg-yellow-500", "bg-teal"];
+const strengthColors = ["bg-accent", "bg-red-500", "bg-yellow-500", "bg-success"];
 
 export default function Authentication() {
     const [searchParams] = useSearchParams();
@@ -100,27 +100,27 @@ export default function Authentication() {
     };
 
     return (
-        <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
+        <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 bg-background">
             <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
                 className="w-full max-w-md"
             >
-                <div className="glass-panel rounded-2xl p-8 relative overflow-hidden">
+                <div className="bg-white border border-accent shadow-sm hover:shadow-md transition-shadow rounded-2xl p-8 relative overflow-hidden">
                     {/* Background decoration */}
-                    <div className="absolute top-0 right-0 -mt-16 -mr-16 w-32 h-32 bg-teal/10 rounded-full blur-2xl"></div>
+                    <div className="absolute top-0 right-0 -mt-16 -mr-16 w-32 h-32 bg-primary/10 rounded-full blur-2xl"></div>
                     <div className="absolute bottom-0 left-0 -mb-16 -ml-16 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl"></div>
 
                     <div className="relative z-10">
                         <div className="text-center mb-8">
-                            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-teal/10 text-teal mb-4">
+                            <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary mb-4 shadow-sm">
                                 <Video size={24} />
                             </div>
-                            <h1 className="text-2xl font-bold text-white mb-2">
+                            <h1 className="text-2xl font-bold text-textMain mb-2">
                                 {formState === 0 ? "Welcome Back" : "Create Account"}
                             </h1>
-                            <p className="text-white-darker text-sm">
+                            <p className="text-textMuted text-sm">
                                 {formState === 0 
                                     ? "Sign in to access your dashboard" 
                                     : "Join VI Connects for secure video meetings"}
@@ -128,19 +128,19 @@ export default function Authentication() {
                         </div>
 
                         {/* Tab Toggle */}
-                        <div className="flex p-1 bg-navy-900 rounded-lg mb-8">
+                        <div className="flex p-1 bg-accent/50 border border-accent rounded-lg mb-8">
                             <button
                                 onClick={() => switchTab(0)}
-                                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                                    formState === 0 ? "bg-navy-700 text-white shadow" : "text-white-darker hover:text-white"
+                                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${
+                                    formState === 0 ? "bg-white text-textMain shadow-sm" : "text-textMuted hover:text-textMain"
                                 }`}
                             >
                                 Sign In
                             </button>
                             <button
                                 onClick={() => switchTab(1)}
-                                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                                    formState === 1 ? "bg-navy-700 text-white shadow" : "text-white-darker hover:text-white"
+                                className={`flex-1 py-2 text-sm font-semibold rounded-md transition-all ${
+                                    formState === 1 ? "bg-white text-textMain shadow-sm" : "text-textMuted hover:text-textMain"
                                 }`}
                             >
                                 Sign Up
@@ -173,69 +173,69 @@ export default function Authentication() {
                                 {/* Full Name (register only) */}
                                 {formState === 1 && (
                                     <div>
-                                        <label className="block text-sm font-medium text-white-muted mb-1.5">Full Name</label>
+                                        <label className="block text-sm font-semibold text-textMain mb-1.5">Full Name</label>
                                         <div className="relative">
                                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <UserIcon size={18} className="text-white-darker" />
+                                                <UserIcon size={18} className="text-textMuted" />
                                             </div>
                                             <input
                                                 type="text"
-                                                className={`w-full pl-10 pr-4 py-2 bg-navy-900 border ${fieldErrors.name ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                                className={`w-full pl-10 pr-4 py-2.5 bg-white border ${fieldErrors.name ? 'border-red-500' : 'border-accent'} rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent text-textMain placeholder-textMuted outline-none transition-all shadow-sm`}
                                                 placeholder="John Doe"
                                                 value={name}
                                                 onChange={(e) => setName(e.target.value)}
                                             />
                                         </div>
-                                        {fieldErrors.name && <p className="mt-1 text-xs text-red-400">{fieldErrors.name}</p>}
+                                        {fieldErrors.name && <p className="mt-1 text-xs text-red-500 font-medium">{fieldErrors.name}</p>}
                                     </div>
                                 )}
 
                                 {/* Username */}
                                 <div>
-                                    <label className="block text-sm font-medium text-white-muted mb-1.5">Username</label>
+                                    <label className="block text-sm font-semibold text-textMain mb-1.5">Username</label>
                                     <div className="relative">
                                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <Mail size={18} className="text-white-darker" />
+                                            <Mail size={18} className="text-textMuted" />
                                         </div>
                                         <input
                                             type="text"
-                                            className={`w-full pl-10 pr-4 py-2 bg-navy-900 border ${fieldErrors.username ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                            className={`w-full pl-10 pr-4 py-2.5 bg-white border ${fieldErrors.username ? 'border-red-500' : 'border-accent'} rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent text-textMain placeholder-textMuted outline-none transition-all shadow-sm`}
                                             placeholder="Enter your username"
                                             value={username}
                                             onChange={(e) => setUsername(e.target.value)}
                                         />
                                     </div>
-                                    {fieldErrors.username && <p className="mt-1 text-xs text-red-400">{fieldErrors.username}</p>}
+                                    {fieldErrors.username && <p className="mt-1 text-xs text-red-500 font-medium">{fieldErrors.username}</p>}
                                 </div>
 
                                 {/* Password */}
                                 <div>
-                                    <label className="block text-sm font-medium text-white-muted mb-1.5">Password</label>
+                                    <label className="block text-sm font-semibold text-textMain mb-1.5">Password</label>
                                     <div className="relative">
                                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <Lock size={18} className="text-white-darker" />
+                                            <Lock size={18} className="text-textMuted" />
                                         </div>
                                         <input
                                             type={showPassword ? "text" : "password"}
-                                            className={`w-full pl-10 pr-10 py-2 bg-navy-900 border ${fieldErrors.password ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                            className={`w-full pl-10 pr-10 py-2.5 bg-white border ${fieldErrors.password ? 'border-red-500' : 'border-accent'} rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent text-textMain placeholder-textMuted outline-none transition-all shadow-sm`}
                                             placeholder="Enter your password"
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                         />
                                         <button
                                             type="button"
-                                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-white-darker hover:text-white"
+                                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-textMuted hover:text-textMain"
                                             onClick={() => setShowPassword(!showPassword)}
                                         >
                                             {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                                         </button>
                                     </div>
-                                    {fieldErrors.password && <p className="mt-1 text-xs text-red-400">{fieldErrors.password}</p>}
+                                    {fieldErrors.password && <p className="mt-1 text-xs text-red-500 font-medium">{fieldErrors.password}</p>}
                                     
                                     {/* Password Strength */}
                                     {formState === 1 && password && (
                                         <div className="mt-3">
-                                            <div className="flex gap-1 h-1.5 rounded-full overflow-hidden bg-navy-900">
+                                            <div className="flex gap-1 h-1.5 rounded-full overflow-hidden bg-accent-lighter">
                                                 {[1, 2, 3].map((level) => (
                                                     <div 
                                                         key={level} 
@@ -243,7 +243,7 @@ export default function Authentication() {
                                                     />
                                                 ))}
                                             </div>
-                                            <p className={`text-xs mt-1 font-medium ${strength >= 3 ? 'text-teal' : strength >= 2 ? 'text-yellow-500' : 'text-red-400'}`}>
+                                            <p className={`text-xs mt-1 font-semibold ${strength >= 3 ? 'text-success' : strength >= 2 ? 'text-yellow-500' : 'text-red-500'}`}>
                                                 {strengthLabels[strength]}
                                             </p>
                                         </div>
@@ -253,38 +253,38 @@ export default function Authentication() {
                                 {/* Confirm Password (register only) */}
                                 {formState === 1 && (
                                     <div>
-                                        <label className="block text-sm font-medium text-white-muted mb-1.5">Confirm Password</label>
+                                        <label className="block text-sm font-semibold text-textMain mb-1.5">Confirm Password</label>
                                         <div className="relative">
                                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                                <Lock size={18} className="text-white-darker" />
+                                                <Lock size={18} className="text-textMuted" />
                                             </div>
                                             <input
                                                 type={showConfirm ? "text" : "password"}
-                                                className={`w-full pl-10 pr-10 py-2 bg-navy-900 border ${fieldErrors.confirmPassword ? 'border-red-500' : 'border-navy-700'} rounded-lg focus:ring-2 focus:ring-teal focus:border-transparent text-white placeholder-white-darker outline-none transition-all`}
+                                                className={`w-full pl-10 pr-10 py-2.5 bg-white border ${fieldErrors.confirmPassword ? 'border-red-500' : 'border-accent'} rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent text-textMain placeholder-textMuted outline-none transition-all shadow-sm`}
                                                 placeholder="Re-enter your password"
                                                 value={confirmPassword}
                                                 onChange={(e) => setConfirmPassword(e.target.value)}
                                             />
                                             <button
                                                 type="button"
-                                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-white-darker hover:text-white"
+                                                className="absolute inset-y-0 right-0 pr-3 flex items-center text-textMuted hover:text-textMain"
                                                 onClick={() => setShowConfirm(!showConfirm)}
                                             >
                                                 {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
                                             </button>
                                         </div>
-                                        {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-red-400">{fieldErrors.confirmPassword}</p>}
+                                        {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-red-500 font-medium">{fieldErrors.confirmPassword}</p>}
                                     </div>
                                 )}
 
                                 <button
                                     type="submit"
                                     disabled={loading}
-                                    className="w-full py-2.5 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-lg transition-all transform hover:-translate-y-0.5 shadow-lg shadow-teal/20 flex items-center justify-center gap-2 mt-6"
+                                    className="w-full py-3 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 mt-6"
                                 >
                                     {loading ? (
                                         <>
-                                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-navy-900" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                             </svg>

@@ -9,17 +9,25 @@ import History from './pages/history';
 import GuestJoin from './pages/GuestJoin';
 import Layout from './components/Layout';
 
+import PublicRoute from './components/PublicRoute';
+import ProtectedRoute from './components/ProtectedRoute';
+
 function App() {
   return (
     <div className="App">
       <Router>
         <AuthProvider>
           <Routes>
-            <Route path='/' element={<Layout><LandingPage /></Layout>} />
-            <Route path='/auth' element={<Layout><Authentication /></Layout>} />
-            <Route path='/home' element={<Layout><HomeComponent /></Layout>} />
-            <Route path='/history' element={<Layout><History /></Layout>} />
+            {/* PUBLIC ONLY ROUTES */}
+            <Route path='/' element={<PublicRoute><Layout><LandingPage /></Layout></PublicRoute>} />
+            <Route path='/auth' element={<PublicRoute><Layout><Authentication /></Layout></PublicRoute>} />
             <Route path='/guest-join' element={<Layout><GuestJoin /></Layout>} />
+
+            {/* PROTECTED ROUTES */}
+            <Route path='/home' element={<ProtectedRoute><Layout><HomeComponent /></Layout></ProtectedRoute>} />
+            <Route path='/history' element={<ProtectedRoute><Layout><History /></Layout></ProtectedRoute>} />
+            
+            {/* MIXED/UNIVERSAL ROUTES */}
             <Route path='/meeting/:meetingCode' element={<VideoMeetComponent />} />
           </Routes>
         </AuthProvider>
