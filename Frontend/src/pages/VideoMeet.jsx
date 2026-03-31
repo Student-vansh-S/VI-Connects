@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import io from "socket.io-client";
-import { 
-    Video, VideoOff, PhoneOff, Mic, MicOff, 
+import {
+    Video, VideoOff, PhoneOff, Mic, MicOff,
     MonitorUp, MonitorOff, MessageSquare, X, Send, Users, Volume2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -40,7 +40,7 @@ export default function VideoMeetComponent() {
     let [messages, setMessages] = useState([]);
     let [message, setMessage] = useState("");
     let [newMessages, setNewMessages] = useState(0);
-    
+
     let [joinStep, setJoinStep] = useState('loading'); // loading, lobby, meeting, error
     let [joinError, setJoinError] = useState("");
     let [username, setUsername] = useState("");
@@ -66,7 +66,7 @@ export default function VideoMeetComponent() {
                 } else if (guestName) {
                     setUsername(decodeURIComponent(guestName));
                 }
-                
+
                 setJoinStep('lobby');
             } catch (err) {
                 setJoinError(err.response?.data?.message || "Invalid meeting code.");
@@ -81,7 +81,7 @@ export default function VideoMeetComponent() {
             if (socketRef.current) {
                 socketRef.current.disconnect();
             }
-            
+
             // Close all active WebRTC connections
             // Use local variable to satisfy exhaustive-deps and ensure correct ref value on cleanup
             // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,7 +106,7 @@ export default function VideoMeetComponent() {
         try {
             // Safari/Firefox standard: Request once batched.
             const userMediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            
+
             // Explicitly ensure audio is enabled
             userMediaStream.getAudioTracks().forEach(track => { track.enabled = true; });
             console.log("[WebRTC] Initial audio track enabled:", userMediaStream.getAudioTracks().length > 0 ? userMediaStream.getAudioTracks()[0].enabled : "No track");
@@ -121,17 +121,17 @@ export default function VideoMeetComponent() {
             if (localVideoref.current) {
                 localVideoref.current.srcObject = userMediaStream;
             }
-            
+
             // Check Screen device availability softly
             if (navigator.mediaDevices.getDisplayMedia) {
                 setScreenAvailable(true);
             } else {
                 setScreenAvailable(false);
             }
-            
+
         } catch (error) {
             console.log("Media Access Error:", error.name, error.message);
-            
+
             // Fallback: If camera is broken/in-use, try Audio only
             if (error.name === "NotReadableError" || error.name === "OverconstrainedError" || error.name === "NotFoundError") {
                 try {
@@ -143,7 +143,7 @@ export default function VideoMeetComponent() {
                     setAudioAvailable(true);
                     setVideo(false);
                     setAudio(true);
-                    
+
                     window.localStream = audioOnlyStream;
                     if (localVideoref.current) {
                         localVideoref.current.srcObject = audioOnlyStream;
@@ -203,8 +203,8 @@ export default function VideoMeetComponent() {
     }
 
     let connectToSocketServer = () => {
-        socketRef.current = io.connect(server_url, { 
-            secure: false, 
+        socketRef.current = io.connect(server_url, {
+            secure: false,
             transports: ["websocket", "polling"]
         })
 
@@ -215,7 +215,7 @@ export default function VideoMeetComponent() {
 
         socketRef.current.on('user-left', (id) => {
             console.log(`[WebRTC] User left: ${id}. Cleaning up connection.`);
-            
+
             // Properly close the peer connection to avoid memory leaks
             if (connectionsRef.current[id]) {
                 connectionsRef.current[id].close();
@@ -242,7 +242,7 @@ export default function VideoMeetComponent() {
 
                 console.log(`[WebRTC] Initializing PeerConnection for: ${socketListId}`);
                 connectionsRef.current[socketListId] = new RTCPeerConnection(peerConfigConnections)
-                
+
                 // Wait for their ice candidate       
                 connectionsRef.current[socketListId].onicecandidate = function (event) {
                     if (event.candidate != null) {
@@ -255,62 +255,62 @@ export default function VideoMeetComponent() {
                     const track = event.track;
                     console.log(`[WebRTC] Received remote track:`, track.kind, track.id);
                     console.log(`[WebRTC] Track state: ${track.readyState}, muted: ${track.muted}, enabled: ${track.enabled}`);
-                    
+
                     setVideos(prevVideos => {
                         let existingVideoIndex = prevVideos.findIndex(v => v.socketId === socketListId);
 
-                            if (existingVideoIndex !== -1) {
-                                // Accumulate new track into the existing video stream safely
-                                const existingVid = prevVideos[existingVideoIndex];
-                                let existingStream = existingVid.stream;
+                        if (existingVideoIndex !== -1) {
+                            // Accumulate new track into the existing video stream safely
+                            const existingVid = prevVideos[existingVideoIndex];
+                            let existingStream = existingVid.stream;
 
-                                // Ensure the track is NOT already in the stream (check by ID)
-                                const hasTrack = existingStream.getTracks().some(t => t.id === track.id);
-                                if (!hasTrack) {
-                                    existingStream.addTrack(track);
-                                    console.log(`[WebRTC] Appended new ${track.kind} track to stream for ${socketListId}`);
-                                }
+                            // Ensure the track is NOT already in the stream (check by ID)
+                            const hasTrack = existingStream.getTracks().some(t => t.id === track.id);
+                            if (!hasTrack) {
+                                existingStream.addTrack(track);
+                                console.log(`[WebRTC] Appended new ${track.kind} track to stream for ${socketListId}`);
+                            }
 
-                                // Also sync any other tracks in the event's streams if present
-                                if (event.streams && event.streams[0]) {
-                                    event.streams[0].getTracks().forEach(t => {
-                                        if (!existingStream.getTracks().some(et => et.id === t.id)) {
-                                            existingStream.addTrack(t);
-                                            console.log(`[WebRTC] Appended bundled ${t.kind} track to ${socketListId}`);
+                            // Also sync any other tracks in the event's streams if present
+                            if (event.streams && event.streams[0]) {
+                                event.streams[0].getTracks().forEach(t => {
+                                    if (!existingStream.getTracks().some(et => et.id === t.id)) {
+                                        existingStream.addTrack(t);
+                                        console.log(`[WebRTC] Appended bundled ${t.kind} track to ${socketListId}`);
+                                    }
+                                });
+                            }
+
+                            // CRITICAL Chrome Fix: Create a FRESH MediaStream instance to force re-binding of srcObject
+                            // This "nudges" the browser to activate the audio engine for an already playing element.
+                            const refreshedStream = new MediaStream(existingStream.getTracks());
+
+                            const updatedVideos = [...prevVideos];
+                            updatedVideos[existingVideoIndex] = {
+                                ...existingVid,
+                                stream: refreshedStream
+                            };
+
+                            console.log(`[WebRTC] Forced stream refresh for ${socketListId} to activate ${track.kind} track.`);
+
+                            // Nudge video playback after React re-renders with the new stream ref.
+                            // Video stays muted — remote audio is handled by Web Audio API in VideoTile.
+                            setTimeout(() => {
+                                const vidEl = document.querySelector(`video[data-socket="${socketListId}"]`);
+                                if (vidEl) {
+                                    vidEl.play().catch(e => {
+                                        if (e.name !== 'AbortError') {
+                                            console.warn("[WebRTC] Delayed track play failed:", e.name);
                                         }
                                     });
                                 }
+                            }, 150);
 
-                                // CRITICAL Chrome Fix: Create a FRESH MediaStream instance to force re-binding of srcObject
-                                // This "nudges" the browser to activate the audio engine for an already playing element.
-                                const refreshedStream = new MediaStream(existingStream.getTracks());
-                                
-                                const updatedVideos = [...prevVideos];
-                                updatedVideos[existingVideoIndex] = {
-                                    ...existingVid,
-                                    stream: refreshedStream
-                                };
-
-                                console.log(`[WebRTC] Forced stream refresh for ${socketListId} to activate ${track.kind} track.`);
-                                
-                                // Nudge video playback after React re-renders with the new stream ref.
-                                // Video stays muted — remote audio is handled by Web Audio API in VideoTile.
-                                setTimeout(() => {
-                                    const vidEl = document.querySelector(`video[data-socket="${socketListId}"]`);
-                                    if (vidEl) {
-                                        vidEl.play().catch(e => {
-                                            if (e.name !== 'AbortError') {
-                                                console.warn("[WebRTC] Delayed track play failed:", e.name);
-                                            }
-                                        });
-                                    }
-                                }, 150);
-
-                                return updatedVideos; 
-                            } else {
+                            return updatedVideos;
+                        } else {
                             // First track arriving for this participant
                             console.log(`[WebRTC] Creating new participant UI for ${socketListId} starting with ${track.kind}`);
-                            
+
                             let remoteStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([track]);
                             let newVideo = {
                                 socketId: socketListId,
@@ -350,7 +350,7 @@ export default function VideoMeetComponent() {
                         window.localStream.getTracks().forEach(track => {
                             connectionsRef.current[id2].addTrack(track, window.localStream);
                         });
-                    } catch (e) { 
+                    } catch (e) {
                         console.error("[WebRTC] Error adding local track to peer:", e);
                     }
 
@@ -372,7 +372,7 @@ export default function VideoMeetComponent() {
         }
         let ctx = window.audioCtx;
         if (ctx.state === 'suspended') ctx.resume();
-        
+
         let oscillator = ctx.createOscillator()
         let dst = oscillator.connect(ctx.createMediaStreamDestination())
         oscillator.start()
@@ -410,24 +410,24 @@ export default function VideoMeetComponent() {
         try {
             console.log("[WebRTC] Stopping screen share, restoring camera...");
             // Re-acquire camera stream natively
-            const cameraStream = await navigator.mediaDevices.getUserMedia({ 
+            const cameraStream = await navigator.mediaDevices.getUserMedia({
                 video: video, // Respect current video toggle state
                 audio: true   // Always request audio to ensure we get a fresh track
             });
             const cameraTrack = cameraStream.getVideoTracks()[0];
             const cameraAudioTrack = cameraStream.getAudioTracks()[0];
-            
+
             // Hot-swap BOTH video AND audio senders for all remote peers
             for (let id in connectionsRef.current) {
                 if (id === socketIdRef.current) continue;
                 const senders = connectionsRef.current[id].getSenders();
-                
+
                 // Replace video sender with camera track
                 const videoSender = senders.find(s => s.track && s.track.kind === "video");
                 if (videoSender && cameraTrack) {
                     await videoSender.replaceTrack(cameraTrack);
                 }
-                
+
                 // Replace audio sender with the new audio track
                 const audioSender = senders.find(s => s.track && s.track.kind === "audio");
                 if (audioSender && cameraAudioTrack) {
@@ -448,12 +448,12 @@ export default function VideoMeetComponent() {
 
             window.localStream = newStream;
             setScreen(false);
-            
+
             // Respect the user's current audio toggle
             if (!audio && cameraAudioTrack) {
                 cameraAudioTrack.enabled = false;
             }
-            
+
             console.log("[WebRTC] Camera stream restored successfully.");
         } catch (error) {
             console.error("[WebRTC] Failed to restore camera after screen share", error);
@@ -512,10 +512,10 @@ export default function VideoMeetComponent() {
         try {
             let tracks = localVideoref.current.srcObject.getTracks()
             tracks.forEach(track => track.stop())
-        } catch (err) { 
+        } catch (err) {
             console.error("[WebRTC] Error stopping tracks on end call:", err);
         }
-        
+
         // Route according to user identity, avoiding a hard reload that might reset context
         if (isAuthenticated) {
             navigate("/home");
@@ -546,8 +546,8 @@ export default function VideoMeetComponent() {
     };
 
     let sendMessage = (e) => {
-        if(e) e.preventDefault();
-        if(!message.trim()) return;
+        if (e) e.preventDefault();
+        if (!message.trim()) return;
         // We do not need to send username in payload anymore, backend uses identity mapping
         socketRef.current.emit('chat-message', message)
         setMessage("");
@@ -567,12 +567,12 @@ export default function VideoMeetComponent() {
                 v.muted = false;
                 v.volume = 1.0;
                 v.play().then(() => {
-                    console.log("[WebRTC] ✅ Unmuted remote video via user gesture.");
+                    console.log("[WebRTC] Unmuted remote video via user gesture.");
                 }).catch(e => {
                     if (e.name !== 'AbortError') {
                         console.warn("[WebRTC] Unmute failed, re-muting:", e.name);
                         v.muted = true;
-                        v.play().catch(() => {});
+                        v.play().catch(() => { });
                     }
                 });
             }
@@ -594,7 +594,7 @@ export default function VideoMeetComponent() {
 
     let connect = async () => {
         if (!username.trim()) return;
-        
+
         // Initialize/Resume AudioContext early
         try {
             if (!window.audioCtx) {
@@ -642,7 +642,7 @@ export default function VideoMeetComponent() {
                 </div>
                 <h2 className="text-2xl font-bold mb-2">{joinError}</h2>
                 <p className="text-white-muted mb-8 max-w-md">There was a problem accessing this meeting room. Please ensure the link is correct.</p>
-                <button 
+                <button
                     onClick={() => navigate('/home')}
                     className="px-6 py-3 bg-teal hover:bg-teal-hover text-navy-900 font-bold rounded-lg transition-colors"
                 >
@@ -657,8 +657,8 @@ export default function VideoMeetComponent() {
             <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
                 <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-400/5 rounded-full blur-[100px] pointer-events-none translate-y-1/3 -translate-x-1/3"></div>
-                
-                <motion.div 
+
+                <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     className="bg-white border border-accent shadow-sm w-full max-w-md p-8 rounded-2xl relative z-10"
@@ -682,7 +682,7 @@ export default function VideoMeetComponent() {
                                     <p className="font-bold text-textMain">{username}</p>
                                 </div>
                             </div>
-                            <button 
+                            <button
                                 onClick={connect}
                                 className="w-full py-3.5 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm"
                             >
@@ -703,7 +703,7 @@ export default function VideoMeetComponent() {
                                     autoFocus
                                 />
                             </div>
-                            <button 
+                            <button
                                 onClick={connect}
                                 disabled={!username.trim()}
                                 className="w-full py-3.5 bg-primary hover:bg-primary-hover text-white font-bold rounded-xl transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
@@ -736,7 +736,7 @@ export default function VideoMeetComponent() {
     // ACTIVE MEETING UI
     return (
         <div className="h-screen w-full bg-background overflow-hidden flex flex-col relative">
-            
+
             {/* Header / Info bar (Floating) */}
             <div className="absolute top-4 left-4 z-20 bg-white/90 backdrop-blur-md border border-accent px-4 py-2 rounded-lg flex items-center gap-3 shadow-sm">
                 <div className="w-2 h-2 rounded-full bg-success animate-pulse"></div>
@@ -746,9 +746,9 @@ export default function VideoMeetComponent() {
             {/* Main Video Area */}
             <div className={`flex-1 flex overflow-hidden ${showModal ? 'w-[calc(100%-350px)]' : 'w-full'} transition-all duration-300`}>
                 <div className="flex-1 p-4 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-fr items-center justify-center content-center w-full h-[calc(100vh-80px)]">
-                    
+
                     {/* Local Video Component Implementation */}
-                    <VideoTile 
+                    <VideoTile
                         isLocal={true}
                         username={username}
                         videoAvailable={videoAvailable}
@@ -771,7 +771,7 @@ export default function VideoMeetComponent() {
             {/* Side Chat Panel */}
             <AnimatePresence>
                 {showModal && (
-                    <motion.div 
+                    <motion.div
                         initial={{ x: 350, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: 350, opacity: 0 }}
@@ -786,7 +786,7 @@ export default function VideoMeetComponent() {
                                 <X size={20} />
                             </button>
                         </div>
-                        
+
                         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white/50">
                             {messages.length === 0 ? (
                                 <div className="h-full flex flex-col items-center justify-center text-textMuted opacity-60">
@@ -811,14 +811,14 @@ export default function VideoMeetComponent() {
 
                         <div className="p-4 bg-background border-t border-accent">
                             <form onSubmit={sendMessage} className="flex gap-2">
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     value={message}
                                     onChange={handleMessage}
                                     placeholder="Send a message..."
                                     className="flex-1 bg-white border border-accent rounded-lg px-3 py-2 text-textMain text-sm focus:outline-none focus:border-primary transition-colors shadow-sm"
                                 />
-                                <button 
+                                <button
                                     type="submit"
                                     disabled={!message.trim()}
                                     className="bg-primary hover:bg-primary-hover text-white p-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-sm"
@@ -835,17 +835,17 @@ export default function VideoMeetComponent() {
             <div className="h-[80px] w-full bg-white border-t border-accent flex items-center justify-center px-4 z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
                 <div className="flex items-center gap-3 sm:gap-4 md:gap-6">
                     {/* Audio */}
-                    <button 
-                        onClick={handleAudio} 
+                    <button
+                        onClick={handleAudio}
                         className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${audio ? 'bg-accent hover:bg-accent-darker text-textMain' : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'}`}
                         title={audio ? "Mute Microphone" : "Unmute Microphone"}
                     >
                         {audio ? <Mic size={22} /> : <MicOff size={22} />}
                     </button>
-                    
+
                     {/* Video */}
-                    <button 
-                        onClick={handleVideo} 
+                    <button
+                        onClick={handleVideo}
                         className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${video ? 'bg-accent hover:bg-accent-darker text-textMain' : 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'}`}
                         title={video ? "Turn Off Camera" : "Turn On Camera"}
                     >
@@ -854,8 +854,8 @@ export default function VideoMeetComponent() {
 
                     {/* Screen Share */}
                     {screenAvailable && (
-                        <button 
-                            onClick={handleScreen} 
+                        <button
+                            onClick={handleScreen}
                             className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm hidden sm:flex ${screen ? 'bg-primary text-white hover:bg-primary-hover shadow-primary/30' : 'bg-accent hover:bg-accent-darker text-textMain'}`}
                             title={screen ? "Stop Sharing" : "Share Screen"}
                         >
@@ -864,11 +864,11 @@ export default function VideoMeetComponent() {
                     )}
 
                     {/* Chat */}
-                    <button 
+                    <button
                         onClick={() => {
-                            if(showModal) closeChat();
+                            if (showModal) closeChat();
                             else openChat();
-                        }} 
+                        }}
                         className={`relative w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center transition-all shadow-sm ${showModal ? 'bg-primary text-white border-white' : 'bg-accent hover:bg-accent-darker text-textMain'}`}
                         title="Chat"
                     >
@@ -883,8 +883,8 @@ export default function VideoMeetComponent() {
                     <div className="w-[1px] h-8 bg-accent-darker mx-2"></div>
 
                     {/* Leave Call */}
-                    <button 
-                        onClick={handleEndCall} 
+                    <button
+                        onClick={handleEndCall}
                         className="px-6 h-12 md:h-14 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center gap-2 font-bold shadow-md transition-all"
                         title="Leave Call"
                     >
