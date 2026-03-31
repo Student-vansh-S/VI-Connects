@@ -27,7 +27,6 @@ Thumbs.db
 
 # Misc
 .cache/
-.vscode/ (if you want to exclude local VSCode settings)
 .idea/
 .pnp
 .pnp.js
