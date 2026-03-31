@@ -1,6 +1,6 @@
 import React, { useState, useContext } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AuthContext } from "../contexts/AuthContext.jsx";
+import { AuthContext } from "../contexts/AuthContext.js";
 import { Eye, EyeOff, Video, Mail, Lock, User as UserIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 

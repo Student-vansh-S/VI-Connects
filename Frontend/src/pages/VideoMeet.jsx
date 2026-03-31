@@ -7,12 +7,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import server from '../environment';
-import { AuthContext } from '../contexts/AuthContext';
+import { AuthContext } from '../contexts/AuthContext.js';
 import api from '../utils/api';
 import VideoTile from '../components/VideoTile';
 
 const server_url = server;
-var connections = {};
+// moved connections to useRef inside component
 
 const peerConfigConnections = {
     "iceServers": [
@@ -26,6 +26,7 @@ export default function VideoMeetComponent() {
 
     var socketRef = useRef();
     let socketIdRef = useRef();
+    let connectionsRef = useRef({});
 
     let localVideoref = useRef();
 
@@ -44,7 +45,6 @@ export default function VideoMeetComponent() {
     let [joinError, setJoinError] = useState("");
     let [username, setUsername] = useState("");
 
-    const videoRef = useRef([])
     let [videos, setVideos] = useState([])
 
     const { user, isAuthenticated, addToUserHistory } = useContext(AuthContext);
@@ -83,9 +83,14 @@ export default function VideoMeetComponent() {
             }
             
             // Close all active WebRTC connections
-            for (let id in connections) {
-                connections[id].close();
-                delete connections[id];
+            // Use local variable to satisfy exhaustive-deps and ensure correct ref value on cleanup
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+            const currentConnections = connectionsRef.current;
+            for (let id in currentConnections) {
+                if (currentConnections[id]) {
+                    currentConnections[id].close();
+                }
+                delete currentConnections[id];
             }
 
             // Stop all local tracks
@@ -169,85 +174,9 @@ export default function VideoMeetComponent() {
         connectToSocketServer();
     }
 
-    let getUserMediaSuccess = (stream) => {
-        try {
-            window.localStream.getTracks().forEach(track => track.stop())
-        } catch (e) { console.log(e) }
+    // getUserMediaSuccess removed as it is now integrated directly into connectToSocketServer logic or no longer needed.
 
-        window.localStream = stream
-        localVideoref.current.srcObject = stream
-
-        for (let id in connections) {
-            if (id === socketIdRef.current) continue
-
-            // Replace tracks in existing senders (don't addTrack — causes duplicate sender errors in Chrome)
-            const senders = connections[id].getSenders();
-            stream.getTracks().forEach(track => {
-                const sender = senders.find(s => s.track && s.track.kind === track.kind);
-                if (sender) {
-                    sender.replaceTrack(track);
-                } else {
-                    connections[id].addTrack(track, window.localStream);
-                }
-            });
-
-            connections[id].createOffer().then((description) => {
-                connections[id].setLocalDescription(description)
-                    .then(() => {
-                        socketRef.current.emit('signal', id, JSON.stringify({ 'sdp': connections[id].localDescription }))
-                    })
-                    .catch(e => console.log(e))
-            })
-        }
-
-        // Only attach onended to VIDEO tracks — audio must stay alive
-        stream.getVideoTracks().forEach(track => {
-            track.onended = () => {
-                console.log("[WebRTC] Video track ended. Replacing with black frame, keeping audio alive.");
-                setVideo(false);
-
-                // Replace only the ended video track with a black frame
-                const blackTrack = black();
-                
-                // Update local stream: remove dead video, add black, keep audio
-                const audioTrack = window.localStream.getAudioTracks()[0];
-                const newStream = new MediaStream();
-                newStream.addTrack(blackTrack);
-                if (audioTrack && audioTrack.readyState === 'live') {
-                    newStream.addTrack(audioTrack);
-                }
-                
-                window.localStream = newStream;
-                if (localVideoref.current) {
-                    localVideoref.current.srcObject = window.localStream;
-                }
-
-                // Replace only the video sender for all peers — do NOT touch audio senders
-                for (let id in connections) {
-                    if (id === socketIdRef.current) continue;
-                    const senders = connections[id].getSenders();
-                    const videoSender = senders.find(s => s.track && s.track.kind === "video");
-                    if (videoSender) {
-                        videoSender.replaceTrack(blackTrack).catch(e => console.log(e));
-                    }
-                }
-            };
-        });
-    }
-
-    let getUserMedia = () => {
-        if ((video && videoAvailable) || (audio && audioAvailable)) {
-            navigator.mediaDevices.getUserMedia({ video: video, audio: audio })
-                .then(getUserMediaSuccess)
-                .then((stream) => { })
-                .catch((e) => console.log(e))
-        } else {
-            try {
-                let tracks = localVideoref.current.srcObject.getTracks()
-                tracks.forEach(track => track.stop())
-            } catch (e) { }
-        }
-    }
+    // Removed unused getUserMedia refresh helper to simplify WebRTC logic and satisfy ESLint.
 
     // getDislayMediaSuccess legacy function removed safely
 
@@ -256,11 +185,11 @@ export default function VideoMeetComponent() {
 
         if (fromId !== socketIdRef.current) {
             if (signal.sdp) {
-                connections[fromId].setRemoteDescription(new RTCSessionDescription(signal.sdp)).then(() => {
+                connectionsRef.current[fromId].setRemoteDescription(new RTCSessionDescription(signal.sdp)).then(() => {
                     if (signal.sdp.type === 'offer') {
-                        connections[fromId].createAnswer().then((description) => {
-                            connections[fromId].setLocalDescription(description).then(() => {
-                                socketRef.current.emit('signal', fromId, JSON.stringify({ 'sdp': connections[fromId].localDescription }))
+                        connectionsRef.current[fromId].createAnswer().then((description) => {
+                            connectionsRef.current[fromId].setLocalDescription(description).then(() => {
+                                socketRef.current.emit('signal', fromId, JSON.stringify({ 'sdp': connectionsRef.current[fromId].localDescription }))
                             }).catch(e => console.log(e))
                         }).catch(e => console.log(e))
                     }
@@ -268,7 +197,7 @@ export default function VideoMeetComponent() {
             }
 
             if (signal.ice) {
-                connections[fromId].addIceCandidate(new RTCIceCandidate(signal.ice)).catch(e => console.log(e))
+                connectionsRef.current[fromId].addIceCandidate(new RTCIceCandidate(signal.ice)).catch(e => console.log(e))
             }
         }
     }
@@ -288,9 +217,9 @@ export default function VideoMeetComponent() {
             console.log(`[WebRTC] User left: ${id}. Cleaning up connection.`);
             
             // Properly close the peer connection to avoid memory leaks
-            if (connections[id]) {
-                connections[id].close();
-                delete connections[id];
+            if (connectionsRef.current[id]) {
+                connectionsRef.current[id].close();
+                delete connectionsRef.current[id];
             }
 
             setVideos((videos) => videos.filter((video) => video.socketId !== id))
@@ -309,20 +238,20 @@ export default function VideoMeetComponent() {
                 let socketListId = typeof clientInfo === 'string' ? clientInfo : clientInfo.socketId;
                 let clientUsername = typeof clientInfo === 'string' ? "Participant" : clientInfo.username;
 
-                if (connections[socketListId]) return; // Skip if already connected
+                if (connectionsRef.current[socketListId]) return; // Skip if already connected
 
                 console.log(`[WebRTC] Initializing PeerConnection for: ${socketListId}`);
-                connections[socketListId] = new RTCPeerConnection(peerConfigConnections)
+                connectionsRef.current[socketListId] = new RTCPeerConnection(peerConfigConnections)
                 
                 // Wait for their ice candidate       
-                connections[socketListId].onicecandidate = function (event) {
+                connectionsRef.current[socketListId].onicecandidate = function (event) {
                     if (event.candidate != null) {
                         socketRef.current.emit('signal', socketListId, JSON.stringify({ 'ice': event.candidate }))
                     }
                 }
 
                 // Wait for their video/audio stream
-                connections[socketListId].ontrack = (event) => {
+                connectionsRef.current[socketListId].ontrack = (event) => {
                     const track = event.track;
                     console.log(`[WebRTC] Received remote track:`, track.kind, track.id);
                     console.log(`[WebRTC] Track state: ${track.readyState}, muted: ${track.muted}, enabled: ${track.enabled}`);
@@ -400,13 +329,13 @@ export default function VideoMeetComponent() {
                 // Add the local video stream using modern addTrack iteration.
                 if (window.localStream !== undefined && window.localStream !== null) {
                     window.localStream.getTracks().forEach(track => {
-                        connections[socketListId].addTrack(track, window.localStream);
+                        connectionsRef.current[socketListId].addTrack(track, window.localStream);
                     });
                 } else {
                     let blackSilence = (...args) => new MediaStream([black(...args), silence()])
                     window.localStream = blackSilence()
                     window.localStream.getTracks().forEach(track => {
-                        connections[socketListId].addTrack(track, window.localStream);
+                        connectionsRef.current[socketListId].addTrack(track, window.localStream);
                     });
                 }
             })
@@ -414,19 +343,21 @@ export default function VideoMeetComponent() {
             // If WE are the one who just joined, initiate offers to everyone else
             if (id === socketIdRef.current) {
                 console.log("[WebRTC] We joined. Initiating offers to all existing peers.");
-                for (let id2 in connections) {
+                for (let id2 in connectionsRef.current) {
                     if (id2 === socketIdRef.current) continue
 
                     try {
                         window.localStream.getTracks().forEach(track => {
-                            connections[id2].addTrack(track, window.localStream);
+                            connectionsRef.current[id2].addTrack(track, window.localStream);
                         });
-                    } catch (e) { }
+                    } catch (e) { 
+                        console.error("[WebRTC] Error adding local track to peer:", e);
+                    }
 
-                    connections[id2].createOffer().then((description) => {
-                        connections[id2].setLocalDescription(description)
+                    connectionsRef.current[id2].createOffer().then((description) => {
+                        connectionsRef.current[id2].setLocalDescription(description)
                             .then(() => {
-                                socketRef.current.emit('signal', id2, JSON.stringify({ 'sdp': connections[id2].localDescription }))
+                                socketRef.current.emit('signal', id2, JSON.stringify({ 'sdp': connectionsRef.current[id2].localDescription }))
                             })
                             .catch(e => console.log(e))
                     })
@@ -487,9 +418,9 @@ export default function VideoMeetComponent() {
             const cameraAudioTrack = cameraStream.getAudioTracks()[0];
             
             // Hot-swap BOTH video AND audio senders for all remote peers
-            for (let id in connections) {
+            for (let id in connectionsRef.current) {
                 if (id === socketIdRef.current) continue;
-                const senders = connections[id].getSenders();
+                const senders = connectionsRef.current[id].getSenders();
                 
                 // Replace video sender with camera track
                 const videoSender = senders.find(s => s.track && s.track.kind === "video");
@@ -498,7 +429,6 @@ export default function VideoMeetComponent() {
                 }
                 
                 // Replace audio sender with the new audio track
-                // (the old audio track will be .stop()'d below, so we must swap first)
                 const audioSender = senders.find(s => s.track && s.track.kind === "audio");
                 if (audioSender && cameraAudioTrack) {
                     await audioSender.replaceTrack(cameraAudioTrack);
@@ -545,9 +475,9 @@ export default function VideoMeetComponent() {
                 };
 
                 // Hot-swap screen track into all active peer connections
-                for (let id in connections) {
+                for (let id in connectionsRef.current) {
                     if (id === socketIdRef.current) continue;
-                    const senders = connections[id].getSenders();
+                    const senders = connectionsRef.current[id].getSenders();
                     const videoSender = senders.find(s => s.track && s.track.kind === "video");
                     if (videoSender) {
                         await videoSender.replaceTrack(screenTrack);
@@ -582,7 +512,9 @@ export default function VideoMeetComponent() {
         try {
             let tracks = localVideoref.current.srcObject.getTracks()
             tracks.forEach(track => track.stop())
-        } catch (e) { }
+        } catch (err) { 
+            console.error("[WebRTC] Error stopping tracks on end call:", err);
+        }
         
         // Route according to user identity, avoiding a hard reload that might reset context
         if (isAuthenticated) {
@@ -622,22 +554,28 @@ export default function VideoMeetComponent() {
     }
 
     const unlockAudio = () => {
-        // Resume AudioContext if suspended (Chrome blocks this until user gesture)
+        // Resume AudioContext if suspended (for silence() track generator)
         if (window.audioCtx && window.audioCtx.state === 'suspended') {
             window.audioCtx.resume().then(() => {
                 console.log("[WebRTC] AudioContext resumed successfully.");
             });
         }
 
-        // Ensure all remote <video> elements are unmuted and playing
-        document.querySelectorAll("video").forEach(v => {
-            // Never unmute local video (causes echo)
-            if (!v.muted) {
-                v.volume = 1;
+        // Unmute and play all REMOTE video elements (they carry audio)
+        document.querySelectorAll("video[data-socket]").forEach(v => {
+            if (v.muted) {
+                v.muted = false;
+                v.volume = 1.0;
+                v.play().then(() => {
+                    console.log("[WebRTC] ✅ Unmuted remote video via user gesture.");
+                }).catch(e => {
+                    if (e.name !== 'AbortError') {
+                        console.warn("[WebRTC] Unmute failed, re-muting:", e.name);
+                        v.muted = true;
+                        v.play().catch(() => {});
+                    }
+                });
             }
-            v.play().catch(e => {
-                if (e.name !== 'AbortError') console.warn("[WebRTC] Failed to unlock video:", e.name);
-            });
         });
     };
 

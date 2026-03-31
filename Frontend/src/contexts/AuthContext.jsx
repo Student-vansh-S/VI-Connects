@@ -1,8 +1,7 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../utils/api.js";
-
-export const AuthContext = createContext({});
+import { AuthContext } from "./AuthContext.js";
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
@@ -93,7 +92,7 @@ export const AuthProvider = ({ children }) => {
     /**
      * Add to meeting history (legacy, disabled for new architecture)
      */
-    const addToUserHistory = async (meetingCode) => {
+    const addToUserHistory = async (_meetingCode) => {
         return { success: true };
     };
 
@@ -140,15 +139,4 @@ export const AuthProvider = ({ children }) => {
             {children}
         </AuthContext.Provider>
     );
-};
-
-/**
- * Custom hook for easy access to auth context
- */
-export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error("useAuth must be used within an AuthProvider");
-    }
-    return context;
 };

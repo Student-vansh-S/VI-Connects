@@ -1,135 +1,140 @@
-import React, { useEffect, useRef } from 'react';
-import { Volume2, MicOff } from 'lucide-react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { Volume2, VolumeX, MicOff } from 'lucide-react';
 
 export default function VideoTile({ 
     vid, 
-    retryAutoplay, 
+    _retryAutoplay, 
     isLocal = false, 
     username = '', 
     videoAvailable = true, 
     audioAvailable = true,
-    onAutoplayFailure
+    _onAutoplayFailure
 }) {
     const videoElRef = useRef(null);
-    const audioSourceRef = useRef(null);
-    const gainNodeRef = useRef(null);
+    const [needsUnmute, setNeedsUnmute] = useState(false);
 
     /**
-     * Attach the stream to the <video> element.
-     * The <video> element is ALWAYS muted — remote audio is handled
-     * separately via the Web Audio API (see next useEffect).
-     * This is the definitive fix for Chrome's autoplay policy which
-     * blocks unmuted <video>.play().
+     * STRATEGY (Simple & Proven — used by Jitsi Meet, Google Meet):
+     * 
+     * LOCAL video:  <video muted> — always muted to prevent echo
+     * REMOTE video: <video> with autoplay attempt:
+     *   1. Try play() with audio (unmuted) — works if user has interacted with page
+     *   2. If blocked by Chrome autoplay policy → mute, play muted, show "Click to unmute"
+     *   3. On ANY user click → unmute all remote videos
+     * 
+     * No Web Audio API. No hidden <audio> elements. Just native <video>.
      */
+
+    // ─── Attach stream and attempt playback ───────────────────
     useEffect(() => {
         const videoEl = videoElRef.current;
         if (!videoEl) return;
 
         const stream = isLocal ? window.localStream : vid?.stream;
         if (!stream) return;
-        if (videoEl.srcObject === stream) return;
 
+        // Always reassign srcObject when stream changes
         videoEl.srcObject = stream;
-        videoEl.muted = true; // ALWAYS muted — audio goes through Web Audio API
 
-        console.log(`[VideoTile] Assigned ${isLocal ? 'local' : vid?.socketId} stream. Tracks:`, 
-            stream.getTracks().map(t => `${t.kind}:${t.readyState}:${t.enabled}`));
+        const tracks = stream.getTracks();
+        console.log(`[VideoTile] ${isLocal ? 'LOCAL' : vid?.socketId} stream assigned. Tracks:`,
+            tracks.map(t => `${t.kind}:${t.readyState}:enabled=${t.enabled}:muted=${t.muted}`));
 
-        videoEl.play().catch((e) => {
-            if (e.name === 'AbortError') return;
-            console.warn(`[VideoTile] Play failed for ${isLocal ? 'local' : vid?.socketId}:`, e.name);
-        });
-
-    }, [isLocal, vid?.stream, vid?.socketId]);
-
-    /**
-     * Web Audio API pipeline for REMOTE audio playback.
-     * 
-     * This completely bypasses Chrome's <video> autoplay restrictions.
-     * The AudioContext was created during the "Join" button click (user gesture),
-     * so it's in 'running' state and can play audio without restrictions.
-     * 
-     * Pipeline: RemoteStream → MediaStreamSource → GainNode → AudioContext.destination (speakers)
-     */
-    useEffect(() => {
-        // Only for remote participants, not local (would cause echo)
-        if (isLocal) return;
-
-        const stream = vid?.stream;
-        if (!stream) return;
-
-        // Wait until the stream actually has audio tracks
-        const audioTracks = stream.getAudioTracks();
-        if (audioTracks.length === 0) {
-            console.log(`[VideoTile] No audio tracks yet for ${vid?.socketId}, waiting...`);
+        if (isLocal) {
+            // Local: always muted to prevent echo
+            videoEl.muted = true;
+            videoEl.play().catch(() => {});
             return;
         }
 
-        const audioTrack = audioTracks[0];
-        if (audioTrack.readyState !== 'live') {
-            console.warn(`[VideoTile] Audio track for ${vid?.socketId} is ${audioTrack.readyState}, skipping Web Audio setup.`);
-            return;
+        // REMOTE: Try to play WITH audio first
+        videoEl.muted = false;
+        videoEl.volume = 1.0;
+
+        const playAttempt = videoEl.play();
+        if (playAttempt !== undefined) {
+            playAttempt
+                .then(() => {
+                    console.log(`[VideoTile] ✅ Remote video+audio playing for ${vid?.socketId} (unmuted)`);
+                    setNeedsUnmute(false);
+                })
+                .catch((err) => {
+                    if (err.name === 'AbortError') return;
+
+                    console.warn(`[VideoTile] ⚠️ Unmuted play blocked for ${vid?.socketId}: ${err.name}`);
+                    
+                    // Fallback: mute and play (video will show, audio won't)
+                    videoEl.muted = true;
+                    videoEl.play().then(() => {
+                        console.log(`[VideoTile] Video playing muted for ${vid?.socketId}, waiting for user gesture to unmute`);
+                        setNeedsUnmute(true);
+                    }).catch((e2) => {
+                        console.error(`[VideoTile] Even muted play failed for ${vid?.socketId}:`, e2);
+                    });
+                });
         }
 
-        // Get or create the global AudioContext (created during user gesture in connect())
-        if (!window.audioCtx) {
-            window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        const ctx = window.audioCtx;
-
-        // Resume if suspended (Chrome suspends AudioContext until user gesture)
-        if (ctx.state === 'suspended') {
-            ctx.resume().then(() => {
-                console.log(`[VideoTile] AudioContext resumed for ${vid?.socketId}`);
-            });
-        }
-
-        // Disconnect previous source if it exists (stream reference changed)
-        if (audioSourceRef.current) {
-            try {
-                audioSourceRef.current.disconnect();
-            } catch (e) {}
-        }
-        if (gainNodeRef.current) {
-            try {
-                gainNodeRef.current.disconnect();
-            } catch (e) {}
-        }
-
-        // Create the audio pipeline:
-        // MediaStreamSource → GainNode → speakers
-        try {
-            const source = ctx.createMediaStreamSource(stream);
-            const gainNode = ctx.createGain();
-            gainNode.gain.value = 1.0;
-
-            source.connect(gainNode);
-            gainNode.connect(ctx.destination);
-
-            audioSourceRef.current = source;
-            gainNodeRef.current = gainNode;
-
-            console.log(`[VideoTile] ✅ Web Audio pipeline active for ${vid?.socketId} (${audioTrack.kind}:${audioTrack.readyState}:${audioTrack.enabled})`);
-        } catch (e) {
-            console.error(`[VideoTile] Failed to create Web Audio pipeline for ${vid?.socketId}:`, e);
-        }
-
-        // Cleanup when stream changes or component unmounts
-        return () => {
-            try {
-                if (audioSourceRef.current) {
-                    audioSourceRef.current.disconnect();
-                    audioSourceRef.current = null;
-                }
-                if (gainNodeRef.current) {
-                    gainNodeRef.current.disconnect();
-                    gainNodeRef.current = null;
-                }
-            } catch (e) {}
+        // When new audio tracks arrive (Chrome often delivers them late),
+        // try to unmute the video element again
+        const handleTrackEvent = () => {
+            const currentTracks = stream.getAudioTracks();
+            console.log(`[VideoTile] Track event for ${vid?.socketId}, audio tracks:`, 
+                currentTracks.map(t => `${t.readyState}:enabled=${t.enabled}:muted=${t.muted}`));
+            
+            if (videoEl.muted && currentTracks.length > 0) {
+                videoEl.muted = false;
+                videoEl.play().then(() => {
+                    console.log(`[VideoTile] ✅ Unmuted after track event for ${vid?.socketId}`);
+                    setNeedsUnmute(false);
+                }).catch(() => {
+                    videoEl.muted = true;
+                    videoEl.play().catch(() => {});
+                });
+            }
         };
+
+        // Listen for track unmute and addtrack events
+        const audioTracks = stream.getAudioTracks();
+        audioTracks.forEach(t => t.addEventListener('unmute', handleTrackEvent));
+        stream.addEventListener('addtrack', handleTrackEvent);
+
+        return () => {
+            audioTracks.forEach(t => t.removeEventListener('unmute', handleTrackEvent));
+            stream.removeEventListener('addtrack', handleTrackEvent);
+        };
+
     }, [isLocal, vid?.stream, vid?.socketId]);
 
-    // Keep local stream in sync (localStream can change without vid prop changing)
+    // ─── Global click to unmute (Chrome needs user gesture) ──────
+    useEffect(() => {
+        if (isLocal || !needsUnmute) return;
+
+        const handleGesture = () => {
+            const videoEl = videoElRef.current;
+            if (!videoEl) return;
+
+            videoEl.muted = false;
+            videoEl.volume = 1.0;
+            videoEl.play().then(() => {
+                console.log(`[VideoTile] ✅ Unmuted via user gesture for ${vid?.socketId}`);
+                setNeedsUnmute(false);
+            }).catch(() => {
+                // Still blocked, keep trying on next click
+                videoEl.muted = true;
+                videoEl.play().catch(() => {});
+            });
+        };
+
+        document.addEventListener('click', handleGesture);
+        document.addEventListener('keydown', handleGesture, { once: true });
+
+        return () => {
+            document.removeEventListener('click', handleGesture);
+            document.removeEventListener('keydown', handleGesture);
+        };
+    }, [isLocal, needsUnmute, vid?.socketId]);
+
+    // ─── Keep local stream in sync ────────────────────────────
     useEffect(() => {
         if (!isLocal) return;
         const videoEl = videoElRef.current;
@@ -137,20 +142,41 @@ export default function VideoTile({
         if (videoEl.srcObject === window.localStream) return;
 
         videoEl.srcObject = window.localStream;
-        videoEl.muted = true; // Local is always muted
+        videoEl.muted = true;
         videoEl.play().catch(() => {});
     });
+
+    // ─── Manual unmute handler ────────────────────────────────
+    const handleManualUnmute = useCallback(() => {
+        const videoEl = videoElRef.current;
+        if (!videoEl) return;
+
+        // Resume AudioContext if it exists (for silence() generator)
+        if (window.audioCtx && window.audioCtx.state === 'suspended') {
+            window.audioCtx.resume();
+        }
+
+        videoEl.muted = false;
+        videoEl.volume = 1.0;
+        videoEl.play().then(() => {
+            console.log(`[VideoTile] ✅ Manual unmute succeeded for ${vid?.socketId}`);
+            setNeedsUnmute(false);
+        }).catch(e => {
+            console.error(`[VideoTile] Manual unmute failed:`, e);
+        });
+    }, [vid?.socketId]);
 
     return (
         <div className="relative w-full h-full min-h-[200px] bg-background border border-accent rounded-2xl overflow-hidden shadow-sm group hover:shadow-md transition-shadow">
             
-            {/* Video element — ALWAYS muted. Remote audio comes through Web Audio API. */}
+            {/* Single video element — muted for local, unmuted for remote */}
             <video
                 data-socket={!isLocal ? vid?.socketId : undefined}
                 ref={videoElRef}
                 autoPlay
                 playsInline
-                muted
+                // Local is always muted. Remote starts unmuted (or gets muted if autoplay blocks)
+                muted={isLocal}
                 className={`w-full h-full object-cover ${!videoAvailable && isLocal ? 'hidden' : ''}`}
             ></video>
 
@@ -165,15 +191,15 @@ export default function VideoTile({
                 </div>
             )}
 
-            {/* Autoplay Chrome Fallback Overlay */}
-            {!isLocal && vid?.autoplayFailed && (
-                <div className="absolute inset-0 bg-white/60 flex flex-col items-center justify-center z-20 backdrop-blur-sm">
+            {/* "Click to Unmute" overlay — only shown if Chrome blocked audio autoplay */}
+            {!isLocal && needsUnmute && (
+                <div className="absolute top-3 right-3 z-20">
                     <button 
-                        onClick={() => retryAutoplay && retryAutoplay(vid.socketId)}
-                        className="px-6 py-3 bg-primary hover:bg-primary-hover text-white font-bold rounded-lg transition-colors flex items-center gap-2 shadow-xl"
+                        onClick={handleManualUnmute}
+                        className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg animate-pulse"
                     >
-                        <Volume2 size={20} />
-                        Click to Enable Audio
+                        <VolumeX size={16} />
+                        Click to Unmute
                     </button>
                 </div>
             )}

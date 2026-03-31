@@ -55,9 +55,9 @@ export default function Footer() {
                         Built with <Heart size={14} className="text-red-500" /> by VI Connects Team
                     </p>
                     <div className="flex gap-4 text-textMuted">
-                        <a href="https://x.com/saini_vans6681" target='_blank' className="hover:text-primary transition-colors"><TwitterIcon /></a>
-                        <a href="https://github.com/Student-vansh-S" target="_blank" className="hover:text-primary transition-colors"><GithubIcon /></a>
-                        <a href="https://www.linkedin.com/in/vansh-saini-4446b02a8/" target="_blank" className="hover:text-primary transition-colors"><LinkedinIcon /></a>
+                        <a href="https://x.com/saini_vans6681" target='_blank' rel="noreferrer" className="hover:text-primary transition-colors"><TwitterIcon /></a>
+                        <a href="https://github.com/Student-vansh-S" target="_blank" rel="noreferrer" className="hover:text-primary transition-colors"><GithubIcon /></a>
+                        <a href="https://www.linkedin.com/in/vansh-saini-4446b02a8/" target="_blank" rel="noreferrer" className="hover:text-primary transition-colors"><LinkedinIcon /></a>
                     </div>
                 </div>
             </div>

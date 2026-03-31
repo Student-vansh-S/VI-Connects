@@ -1,12 +1,11 @@
 import React, { useContext, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AuthContext } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
+import { AuthContext } from '../contexts/AuthContext.js';
 import { Video, LogOut, Menu, X, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function Navbar() {
     const { isAuthenticated, user, handleLogout } = useContext(AuthContext);
-    const navigate = useNavigate();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
     const navLinks = isAuthenticated ? (

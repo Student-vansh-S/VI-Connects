@@ -1,11 +1,11 @@
 import React, { useContext, useState } from "react";
 import withAuth from "../utils/withAuth.jsx";
 import { useNavigate } from "react-router-dom";
-import { AuthContext } from "../contexts/AuthContext.jsx";
+import { AuthContext } from "../contexts/AuthContext.js";
 import { motion, AnimatePresence } from "framer-motion";
 import { Video, Plus, Check, Copy, ArrowRight, Clock, LogOut } from "lucide-react";
 
-function HomeComponent() {
+function Home() {
     const navigate = useNavigate();
     const { user, handleLogout, generateMeeting, joinMeeting } = useContext(AuthContext);
 
@@ -255,4 +255,4 @@ function HomeComponent() {
     );
 }
 
-export default withAuth(HomeComponent);
+export default withAuth(Home);

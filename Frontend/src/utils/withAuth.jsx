@@ -1,6 +1,6 @@
 import { useContext, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { AuthContext } from "../contexts/AuthContext.jsx";
+import { AuthContext } from "../contexts/AuthContext.js";
 
 /**
  * HOC to protect routes — redirects to /auth if not authenticated.

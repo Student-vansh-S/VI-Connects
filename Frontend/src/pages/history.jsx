@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
-import { AuthContext } from "../contexts/AuthContext.jsx";
+import { AuthContext } from "../contexts/AuthContext.js";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowLeft, Clock, Calendar, Video, Copy, Check, Trash } from "lucide-react";
@@ -59,6 +59,7 @@ export default function History() {
                 await deleteFromHistory(id);
                 setMeetings((prev) => prev.filter((m) => m._id !== id));
             } catch (err) {
+                console.error("Deletion error:", err);
                 alert("Failed to delete meeting. Please try again.");
             }
         }
@@ -115,7 +116,7 @@ export default function History() {
                             <Video size={32} className="text-textMuted" />
                         </div>
                         <h3 className="text-xl font-bold text-textMain mb-2">No meetings yet</h3>
-                        <p className="text-textMuted mb-6">You haven't generated any meetings. Head back to the dashboard to start one.</p>
+                        <p className="text-textMuted mb-6">You haven&apos;t generated any meetings. Head back to the dashboard to start one.</p>
                         <button 
                             onClick={() => routeTo("/home")}
                             className="px-6 py-2.5 bg-primary hover:bg-primary-hover text-white font-semibold rounded-xl shadow-sm transition-colors"
