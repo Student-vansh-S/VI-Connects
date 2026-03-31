@@ -27,6 +27,7 @@ Thumbs.db
 
 # Misc
 .cache/
+.vscode/
 .idea/
 .pnp
 .pnp.js
